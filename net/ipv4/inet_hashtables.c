@@ -32,14 +32,15 @@ struct inet_bind_bucket *inet_bind_bucket_create(struct kmem_cache *cachep,
 						 struct inet_bind_hashbucket *head,
 						 const unsigned short snum)
 {
+	//申请桶结构
 	struct inet_bind_bucket *tb = kmem_cache_alloc(cachep, GFP_ATOMIC);
 
 	if (tb != NULL) {
-		tb->ib_net       = hold_net(net);
-		tb->port      = snum;
-		tb->fastreuse = 0;
-		INIT_HLIST_HEAD(&tb->owners);
-		hlist_add_head(&tb->node, &head->chain);
+		tb->ib_net       = hold_net(net);//记录网络空间
+		tb->port      = snum;//记录端口号
+		tb->fastreuse = 0;//快速复用标记为0，外面会根据sock进行调整
+		INIT_HLIST_HEAD(&tb->owners);//初始化sock队列
+		hlist_add_head(&tb->node, &head->chain);//将桶结构链入到hash桶中
 	}
 	return tb;
 }

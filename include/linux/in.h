@@ -179,11 +179,11 @@ struct in_pktinfo
 /* Structure describing an Internet (IP) socket address. */
 #define __SOCK_SIZE__	16		/* sizeof(struct sockaddr)	*/
 struct sockaddr_in {
-  sa_family_t		sin_family;	/* Address family		*/
-  __be16		sin_port;	/* Port number			*/
-  struct in_addr	sin_addr;	/* Internet address		*/
+  sa_family_t		sin_family;	/* Address family	协议族	*/
+  __be16		sin_port;	/* Port number		端口号	*/
+  struct in_addr	sin_addr;	/* Internet address	IP地址	*/
 
-  /* Pad to size of `struct sockaddr'. */
+  /* Pad to size of `struct sockaddr'. 用于补齐 struct sockaddr 的长度*/
   unsigned char		__pad[__SOCK_SIZE__ - sizeof(short int) -
 			sizeof(unsigned short int) - sizeof(struct in_addr)];
 };

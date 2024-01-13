@@ -115,14 +115,14 @@ enum sock_shutdown_cmd {
  *  @type: socket type (%SOCK_STREAM, etc)
  */
 struct socket {
-	socket_state		state;
-	unsigned long		flags;
-	const struct proto_ops	*ops;
-	struct fasync_struct	*fasync_list;
-	struct file		*file;
-	struct sock		*sk;
-	wait_queue_head_t	wait;
-	short			type;
+	socket_state		state;//socket状态，注意不是连接的状态
+	unsigned long		flags;//socket标志位
+	const struct proto_ops	*ops;//socket操作函数列表
+	struct fasync_struct	*fasync_list;//socket异步唤醒队列
+	struct file		*file; //socket关联的文件指针
+	struct sock		*sk; //代表具体协议类型。socket是BSD的抽象，sock是TCP层的抽象
+	wait_queue_head_t	wait; //等待队列
+	short			type; //socket类型
 };
 
 struct vm_area_struct;

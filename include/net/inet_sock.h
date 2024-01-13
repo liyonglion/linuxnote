@@ -125,7 +125,7 @@ struct inet_sock {
 	__u8			mc_ttl;
 	__u8			pmtudisc;
 	__u8			recverr:1,
-				is_icsk:1,
+				is_icsk:1, //标识是否是inet_connection_sock类型
 				freebind:1,
 				hdrincl:1,
 				mc_loop:1;

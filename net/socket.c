@@ -120,7 +120,7 @@ static ssize_t sock_splice_read(struct file *file, loff_t *ppos,
  *	Socket files have a set of 'special' operations as well as the generic file ones. These don't appear
  *	in the operation structures but are done directly via the socketcall() multiplexor.
  */
-
+//将socket抽象成file 提供的实际操作
 static const struct file_operations socket_file_ops = {
 	.owner =	THIS_MODULE,
 	.llseek =	no_llseek,
@@ -240,13 +240,15 @@ static struct kmem_cache *sock_inode_cachep __read_mostly;
 static struct inode *sock_alloc_inode(struct super_block *sb)
 {
 	struct socket_alloc *ei;
-
+	//分配socket_alloc节点
 	ei = kmem_cache_alloc(sock_inode_cachep, GFP_KERNEL);
 	if (!ei)
 		return NULL;
+	//初始化等待队列	
 	init_waitqueue_head(&ei->socket.wait);
-
+	//初始化struct socket结构体
 	ei->socket.fasync_list = NULL;
+	//将状态设置为SS_UNCONNECTED，这不是连接的状态，连接状态在struct sock ->state
 	ei->socket.state = SS_UNCONNECTED;
 	ei->socket.flags = 0;
 	ei->socket.ops = NULL;
@@ -284,7 +286,7 @@ static int init_inodecache(void)
 }
 
 static struct super_operations sockfs_ops = {
-	.alloc_inode =	sock_alloc_inode,
+	.alloc_inode =	sock_alloc_inode,//申请inode节点
 	.destroy_inode =sock_destroy_inode,
 	.statfs =	simple_statfs,
 };
@@ -298,7 +300,7 @@ static int sockfs_get_sb(struct file_system_type *fs_type,
 }
 
 static struct vfsmount *sock_mnt __read_mostly;
-
+//sockfs文件系统
 static struct file_system_type sock_fs_type = {
 	.name =		"sockfs",
 	.get_sb =	sockfs_get_sb,
@@ -352,9 +354,9 @@ static int sock_alloc_fd(struct file **filep)
 {
 	int fd;
 
-	fd = get_unused_fd();
+	fd = get_unused_fd();//从当前进程获取一个未使用的fd
 	if (likely(fd >= 0)) {
-		struct file *file = get_empty_filp();
+		struct file *file = get_empty_filp();//分配一个空的struct file结构
 
 		*filep = file;
 		if (unlikely(!file)) {
@@ -370,26 +372,29 @@ static int sock_attach_fd(struct socket *sock, struct file *file)
 {
 	struct dentry *dentry;
 	struct qstr name = { .name = "" };
-
+	//创建一个socket文件系统的目录项
 	dentry = d_alloc(sock_mnt->mnt_sb->s_root, &name);
 	if (unlikely(!dentry))
 		return -ENOMEM;
-
+	//目录项的操作表挂入socket文件系统的目录操作表
 	dentry->d_op = &sockfs_dentry_operations;
 	/*
 	 * We dont want to push this dentry into global dentry hash table.
 	 * We pretend dentry is already hashed, by unsetting DCACHE_UNHASHED
 	 * This permits a working /proc/$pid/fd/XXX on sockets
+	 * 因为不想把 socket 目录项放入全局的目录项 hash 数组中,因此清除其 DCACHE UNHASHED 标志。假装目录项已经 hash过了,允许通过 proc 文件系统目录/proc/$pid/fd/xxX 访问 socket
 	 */
 	dentry->d_flags &= ~DCACHE_UNHASHED;
 	d_instantiate(dentry, SOCK_INODE(sock));
-
+	//赋值
 	sock->file = file;
+	//对 socket 的文件结构进行初始化,注意传递的文件操作表是 socket_file_ops。对这个fd调用write()操作，其实是操作socket_file_ops->aio_write()即调用sock_aio_write()函数
 	init_file(file, sock_mnt, dentry, FMODE_READ | FMODE_WRITE,
 		  &socket_file_ops);
 	SOCK_INODE(sock)->i_fop = &socket_file_ops;
 	file->f_flags = O_RDWR;
 	file->f_pos = 0;
+	//struct file关联struct socket
 	file->private_data = sock;
 
 	return 0;
@@ -398,12 +403,13 @@ static int sock_attach_fd(struct socket *sock, struct file *file)
 int sock_map_fd(struct socket *sock)
 {
 	struct file *newfile;
+	//为socket分配文件号和文件结构
 	int fd = sock_alloc_fd(&newfile);
 
 	if (likely(fd >= 0)) {
 		int err = sock_attach_fd(sock, newfile);
 
-		if (unlikely(err < 0)) {
+		if (unlikely(err < 0)) {//出错则释放
 			put_filp(newfile);
 			put_unused_fd(fd);
 			return err;
@@ -458,8 +464,10 @@ static struct socket *sockfd_lookup_light(int fd, int *err, int *fput_needed)
 	struct socket *sock;
 
 	*err = -EBADF;
+	//从当前进程文件列表中找到struct file对象
 	file = fget_light(fd, fput_needed);
 	if (file) {
+		//从file中获取socket对象。file->private_data就是struct socket指针
 		sock = sock_from_file(file, err);
 		if (sock)
 			return sock;
@@ -480,11 +488,16 @@ static struct socket *sock_alloc(void)
 {
 	struct inode *inode;
 	struct socket *sock;
-
+	//在网络文件系统中创建文件节点同时分配 socket 结构
+	/*
+		代码涉及文件系统的inode文件节点,调用new_inode()分配节点sock_mnt是socket网络文件系统的根节点。
+		这里是在 socket 网络文件系统中分配一个 inode 节点分配节点后服务器程序便可以通过函数 read()和 write()找到 socket 进行读/写操作。
+		在linux中，一切皆文件，包括socket也是。inode是VFS层的抽象，socket作为“文件”就必须实现inode相关的操作才行。调用堆栈：new_inode->alloc_inode->sock_alloc_inode
+	*/
 	inode = new_inode(sock_mnt->mnt_sb);
 	if (!inode)
 		return NULL;
-
+	//获取struct socket指针
 	sock = SOCKET_I(inode);
 
 	inode->i_mode = S_IFSOCK | S_IRWXUGO;
@@ -1129,14 +1142,14 @@ static int __sock_create(struct net *net, int family, int type, int protocol,
 	 *	the protocol is 0, the family is instructed to select an appropriate
 	 *	default.
 	 */
-	sock = sock_alloc();
+	sock = sock_alloc();//分配struct socket 空间
 	if (!sock) {
-		if (net_ratelimit())
+		if (net_ratelimit())//检查是否超过限制
 			printk(KERN_WARNING "socket: no more sockets\n");
 		return -ENFILE;	/* Not exactly a match, but its the
 				   closest posix thing */
 	}
-
+	//复制具体的协议族类型，例如SOCK_STREAM
 	sock->type = type;
 
 #if defined(CONFIG_KMOD)
@@ -1151,6 +1164,7 @@ static int __sock_create(struct net *net, int family, int type, int protocol,
 #endif
 
 	rcu_read_lock();
+	//获取协议族类型。对于AF_NET 是inet_family_ops，AF_UNIX是unix_family_ops，AF_NET6是inet6_family_ops。每个协议族都要调用sock_register()将对应协议注册进net_families中
 	pf = rcu_dereference(net_families[family]);
 	err = -EAFNOSUPPORT;
 	if (!pf)
@@ -1165,7 +1179,7 @@ static int __sock_create(struct net *net, int family, int type, int protocol,
 
 	/* Now protected by module ref count */
 	rcu_read_unlock();
-
+	//创建对应type类型的struct sock。也就是TCP层的sock。AF_NET的create是inet_create
 	err = pf->create(net, sock, protocol);
 	if (err < 0)
 		goto out_module_put;
@@ -1217,11 +1231,11 @@ asmlinkage long sys_socket(int family, int type, int protocol)
 {
 	int retval;
 	struct socket *sock;
-
+	//创建struct socket 结构体
 	retval = sock_create(family, type, protocol, &sock);
 	if (retval < 0)
 		goto out;
-
+	//将sock 映射到fd
 	retval = sock_map_fd(sock);
 	if (retval < 0)
 		goto out_release;
@@ -1342,20 +1356,22 @@ asmlinkage long sys_bind(int fd, struct sockaddr __user *umyaddr, int addrlen)
 {
 	struct socket *sock;
 	char address[MAX_SOCK_ADDR];
-	int err, fput_needed;
-
+	int err, fput_needed;//fput_needed 标识，表示是否需要递减文件的计数
+	//通过fd找到创建的struct socket 结构
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
 	if (sock) {
+		//复制地址到内核空间
 		err = move_addr_to_kernel(umyaddr, addrlen, address);
 		if (err >= 0) {
 			err = security_socket_bind(sock,
 						   (struct sockaddr *)address,
 						   addrlen);
-			if (!err)
+			if (!err)//调用具体的协议族bind函数，即inet_bind
 				err = sock->ops->bind(sock,
 						      (struct sockaddr *)
 						      address, addrlen);
 		}
+		//fput_needed 来递减文件的计数器,如果文件的计数器递减到0则进一步释放文件结构指针
 		fput_light(sock->file, fput_needed);
 	}
 	return err;
@@ -2104,11 +2120,12 @@ asmlinkage long sys_socketcall(int call, unsigned long __user *args)
  *	advertise its address family, and have it linked into the
  *	socket interface. The value ops->family coresponds to the
  *	socket system call protocol family.
+ 注册协议族
  */
 int sock_register(const struct net_proto_family *ops)
 {
 	int err;
-
+	//无效的协议族
 	if (ops->family >= NPROTO) {
 		printk(KERN_CRIT "protocol %d >= NPROTO(%d)\n", ops->family,
 		       NPROTO);
@@ -2119,7 +2136,7 @@ int sock_register(const struct net_proto_family *ops)
 	if (net_families[ops->family])
 		err = -EEXIST;
 	else {
-		net_families[ops->family] = ops;
+		net_families[ops->family] = ops;//将操作登记到全局数组中
 		err = 0;
 	}
 	spin_unlock(&net_family_lock);

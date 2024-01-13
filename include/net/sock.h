@@ -199,86 +199,88 @@ struct sock {
 	/*
 	 * Now struct inet_timewait_sock also uses sock_common, so please just
 	 * don't add nothing before this first member (__sk_common) --acme
+	 * 结构 inet_timewait_sock 也会使用 sock_common，所以不要在__sk_common前面添加任何内容
 	 */
-	struct sock_common	__sk_common;
-#define sk_family		__sk_common.skc_family
-#define sk_state		__sk_common.skc_state
-#define sk_reuse		__sk_common.skc_reuse
-#define sk_bound_dev_if		__sk_common.skc_bound_dev_if
-#define sk_node			__sk_common.skc_node
-#define sk_bind_node		__sk_common.skc_bind_node
-#define sk_refcnt		__sk_common.skc_refcnt
-#define sk_hash			__sk_common.skc_hash
-#define sk_prot			__sk_common.skc_prot
-#define sk_net			__sk_common.skc_net
-	unsigned char		sk_shutdown : 2,
-				sk_no_check : 2,
-				sk_userlocks : 4;
-	unsigned char		sk_protocol;
-	unsigned short		sk_type;
-	int			sk_rcvbuf;
-	socket_lock_t		sk_lock;
+	struct sock_common	__sk_common;//与inet_timewait_sock共享使用
+#define sk_family		__sk_common.skc_family //地址族
+#define sk_state		__sk_common.skc_state //连接状态
+#define sk_reuse		__sk_common.skc_reuse //确定地址复用
+#define sk_bound_dev_if		__sk_common.skc_bound_dev_if //绑定设备ID
+#define sk_node			__sk_common.skc_node //用于链入ehash表，也就是ehash（ESTABLISHED状态的hash表）中
+#define sk_bind_node		__sk_common.skc_bind_node //用于链入bhash表。绑定的端口会加入到bbash中，key是监听的端口号，value是struct sock *
+#define sk_refcnt		__sk_common.skc_refcnt //引用计数
+#define sk_hash			__sk_common.skc_hash //ehash的hash值
+#define sk_prot			__sk_common.skc_prot //协议函数表，再tcp中表示 tcp_prot,udp表示upd_prot
+#define sk_net			__sk_common.skc_net //网络命名空间
+	unsigned char		sk_shutdown : 2, //是否关闭；SEND_SHUTDOWN 和RCV_SHUTDOWN 的掩码号后边的2表示占2位
+				sk_no_check : 2, //是否检查数据包
+				sk_userlocks : 4; //用户锁
+	unsigned char		sk_protocol; //协议族具体的协议
+	unsigned short		sk_type; //socket类型，例如SOCK_STREAM
+	int			sk_rcvbuf; //接收缓冲区长度，单位字节
+	socket_lock_t		sk_lock; //同步锁
 	/*
 	 * The backlog queue is special, it is always used with
 	 * the per-socket spinlock held and requires low latency
 	 * access. Therefore we special case it's implementation.
+	 * 用于后备队列使用，它总是使用自旋锁并且“懒散”式的访问，因此而定义
 	 */
 	struct {
-		struct sk_buff *head;
-		struct sk_buff *tail;
-	} sk_backlog;
-	wait_queue_head_t	*sk_sleep;
-	struct dst_entry	*sk_dst_cache;
-	struct xfrm_policy	*sk_policy[2];
-	rwlock_t		sk_dst_lock;
-	atomic_t		sk_rmem_alloc;
-	atomic_t		sk_wmem_alloc;
-	atomic_t		sk_omem_alloc;
-	int			sk_sndbuf;
-	struct sk_buff_head	sk_receive_queue;
-	struct sk_buff_head	sk_write_queue;
-	struct sk_buff_head	sk_async_wait_queue;
-	int			sk_wmem_queued;
-	int			sk_forward_alloc;
-	gfp_t			sk_allocation;
-	int			sk_route_caps;
-	int			sk_gso_type;
-	unsigned int		sk_gso_max_size;
-	int			sk_rcvlowat;
-	unsigned long 		sk_flags;
-	unsigned long	        sk_lingertime;
-	struct sk_buff_head	sk_error_queue;
-	struct proto		*sk_prot_creator;
-	rwlock_t		sk_callback_lock;
-	int			sk_err,
-				sk_err_soft;
-	atomic_t		sk_drops;
-	unsigned short		sk_ack_backlog;
-	unsigned short		sk_max_ack_backlog;
-	__u32			sk_priority;
-	struct ucred		sk_peercred;
-	long			sk_rcvtimeo;
-	long			sk_sndtimeo;
-	struct sk_filter      	*sk_filter;
-	void			*sk_protinfo;
-	struct timer_list	sk_timer;
-	ktime_t			sk_stamp;
-	struct socket		*sk_socket;
-	void			*sk_user_data;
-	struct page		*sk_sndmsg_page;
-	struct sk_buff		*sk_send_head;
-	__u32			sk_sndmsg_off;
-	int			sk_write_pending;
-	void			*sk_security;
-	__u32			sk_mark;
+		struct sk_buff *head;//记录最先收到的数据包
+		struct sk_buff *tail;//记录最后首都奥的数据包
+	} sk_backlog;//backlog队列
+	wait_queue_head_t	*sk_sleep; //sock等待队列
+	struct dst_entry	*sk_dst_cache; //路由项缓存
+	struct xfrm_policy	*sk_policy[2]; //流策略
+	rwlock_t		sk_dst_lock; //路由项缓存锁
+	atomic_t		sk_rmem_alloc; //接收队列字节数
+	atomic_t		sk_wmem_alloc; //发送队列的字节数
+	atomic_t		sk_omem_alloc; //可选择的字节数。o表示option或者other的意思
+	int			sk_sndbuf; //发送缓存区总长度
+	struct sk_buff_head	sk_receive_queue; //接收队列
+	struct sk_buff_head	sk_write_queue; //发送队列
+	struct sk_buff_head	sk_async_wait_queue; //DMA复制的数据包队列
+	int			sk_wmem_queued; //全部数据包占用的总内存计数
+	int			sk_forward_alloc; //记录可用内存长度
+	gfp_t			sk_allocation; //内核内存分配模式
+	int			sk_route_caps; //路由兼容标志位
+	int			sk_gso_type; //GSO通用分段类型
+	unsigned int		sk_gso_max_size; //GSO最大的长度
+	int			sk_rcvlowat; //SO_RCVLOWAT设置
+	unsigned long 		sk_flags; //SO_LINGER (l onoff)，SO_BROADCAST，SO_KEEPALIVE,SO_OOBINLINE设置
+	unsigned long	        sk_lingertime; //停留时间，确定关闭时间
+	struct sk_buff_head	sk_error_queue; //很少使用
+	struct proto		*sk_prot_creator; //socket创建接口
+	rwlock_t		sk_callback_lock; //后半部分使用的锁
+	int			sk_err, //错误码
+				sk_err_soft; //持续出现的错误
+	atomic_t		sk_drops; //原始socket发送计数器
+	unsigned short		sk_ack_backlog; //当前监听的连接数量。全连接队列当前长度
+	unsigned short		sk_max_ack_backlog; //在 listen()中监听到的连接数量
+	__u32			sk_priority; //优先级
+	struct ucred		sk_peercred; //SO_PEERCRED 设置
+	long			sk_rcvtimeo; //SO_RCVTIMEO设置
+	long			sk_sndtimeo; //SO_SNDTIMEO设置
+	struct sk_filter      	*sk_filter; //socket过滤器
+	void			*sk_protinfo; //私有区域，当不使用 slab 高速缓存时由协议族定义
+	struct timer_list	sk_timer; //sock的冲刷定时器
+	ktime_t			sk_stamp; //最后接收包时间
+	struct socket		*sk_socket; //指向struct socket指针
+	void			*sk_user_data; //RPC提供的数据
+	struct page		*sk_sndmsg_page; //发送数据块所在的缓冲页
+	struct sk_buff		*sk_send_head;//发送数据包的队列头
+	__u32			sk_sndmsg_off; //发送数据块在缓冲页的结尾
+	int			sk_write_pending; //等待发送的数量
+	void			*sk_security; //安全模式相关
+	__u32			sk_mark; //通用数据包掩码
 	/* XXX 4 bytes hole on 64 bit */
-	void			(*sk_state_change)(struct sock *sk);
-	void			(*sk_data_ready)(struct sock *sk, int bytes);
-	void			(*sk_write_space)(struct sock *sk);
-	void			(*sk_error_report)(struct sock *sk);
+	void			(*sk_state_change)(struct sock *sk); //在 sock 的状态改变后要调用的函数
+	void			(*sk_data_ready)(struct sock *sk, int bytes); //在数据被处理后要调用的函数。tcp表示tcp_v4_rcv,udp表示udp_rcv
+	void			(*sk_write_space)(struct sock *sk); //当发送空间可以使用后,调用的函数
+	void			(*sk_error_report)(struct sock *sk); //处理错误函数
   	int			(*sk_backlog_rcv)(struct sock *sk,
-						  struct sk_buff *skb);  
-	void                    (*sk_destruct)(struct sock *sk);
+						  struct sk_buff *skb);  //处理首次接收SYNC报文的函数
+	void                    (*sk_destruct)(struct sock *sk); //sock销毁函数
 };
 
 /*

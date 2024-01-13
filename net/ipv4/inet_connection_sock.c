@@ -61,7 +61,7 @@ int inet_csk_bind_conflict(const struct sock *sk,
 	 * in tb->owners list belong to the same net - the
 	 * one this bucket belongs to.
 	 */
-
+	//桶队列中取出每个sock结构，对比绑定的sock结构，如果设备相同，绑定的地址也相同就地址冲突了
 	sk_for_each_bound(sk2, node, &tb->owners) {
 		if (sk != sk2 &&
 		    !inet_v6_ipv6only(sk2) &&
@@ -95,25 +95,26 @@ int inet_csk_get_port(struct sock *sk, unsigned short snum)
 	struct net *net = sock_net(sk);
 
 	local_bh_disable();
-	if (!snum) {
+	if (!snum) {//没有指定端口号
 		int remaining, rover, low, high;
-
+		//获取sysctl.ipv4.tcp_port_range 系统配置的端口号范围
 		inet_get_local_port_range(&low, &high);
 		remaining = (high - low) + 1;
+		//从随机一个端口号开始往下查找可用端口
 		rover = net_random() % remaining + low;
 
 		do {
-			head = &hashinfo->bhash[inet_bhashfn(rover, hashinfo->bhash_size)];
+			head = &hashinfo->bhash[inet_bhashfn(rover, hashinfo->bhash_size)];//根据端口号在bhash查找是否已经绑定
 			spin_lock(&head->lock);
 			inet_bind_bucket_for_each(tb, node, &head->chain)
-				if (tb->ib_net == net && tb->port == rover)
+				if (tb->ib_net == net && tb->port == rover)//发现已经绑定了，则往下查找。说明为绑定端口是不允许出现端口复用的
 					goto next;
 			break;
 		next:
 			spin_unlock(&head->lock);
-			if (++rover > high)
+			if (++rover > high)//从低地址开始找
 				rover = low;
-		} while (--remaining > 0);
+		} while (--remaining > 0);//循环查找
 
 		/* Exhausted local port range during search?  It is not
 		 * possible for us to be holding one of the bind hash
@@ -122,49 +123,49 @@ int inet_csk_get_port(struct sock *sk, unsigned short snum)
 		 * the top level, not from the 'break;' statement.
 		 */
 		ret = 1;
-		if (remaining <= 0)
+		if (remaining <= 0)//说明查找失败
 			goto fail;
 
 		/* OK, here is the one we will use.  HEAD is
 		 * non-NULL and we hold it's mutex.
 		 */
-		snum = rover;
-	} else {
+		snum = rover;//找到可用端口号
+	} else {//指定了端口号
 		head = &hashinfo->bhash[inet_bhashfn(snum, hashinfo->bhash_size)];
 		spin_lock(&head->lock);
 		inet_bind_bucket_for_each(tb, node, &head->chain)
-			if (tb->ib_net == net && tb->port == snum)
+			if (tb->ib_net == net && tb->port == snum)//找到了，说明之前已经被其他进程进行了bind。需要判断端口是否可以复用
 				goto tb_found;
 	}
 	tb = NULL;
 	goto tb_not_found;
-tb_found:
+tb_found://走到这，说明
 	if (!hlist_empty(&tb->owners)) {
 		if (tb->fastreuse > 0 &&
-		    sk->sk_reuse && sk->sk_state != TCP_LISTEN) {
+		    sk->sk_reuse && sk->sk_state != TCP_LISTEN) {//TCP_LISTEN状态的套接字不允许出现复用情况
 			goto success;
 		} else {
-			ret = 1;
+			ret = 1;//桶结构中的 sock 队列是否存在冲突。具体是 inet_csk_bind_conflict()
 			if (inet_csk(sk)->icsk_af_ops->bind_conflict(sk, tb))
 				goto fail_unlock;
 		}
 	}
-tb_not_found:
+tb_not_found://走到这个位置，说明端口号没有被占用，可以直接进行bind操作
 	ret = 1;
 	if (!tb && (tb = inet_bind_bucket_create(hashinfo->bind_bucket_cachep,
 					net, head, snum)) == NULL)
 		goto fail_unlock;
-	if (hlist_empty(&tb->owners)) {
-		if (sk->sk_reuse && sk->sk_state != TCP_LISTEN)
-			tb->fastreuse = 1;
-		else
+	if (hlist_empty(&tb->owners)) {//sock队列是否为空
+		if (sk->sk_reuse && sk->sk_state != TCP_LISTEN)//sk支持复用，且没有处于监听状态
+			tb->fastreuse = 1;//允许复用
+		else//sk不允许复用
 			tb->fastreuse = 0;
 	} else if (tb->fastreuse &&
-		   (!sk->sk_reuse || sk->sk_state == TCP_LISTEN))
+		   (!sk->sk_reuse || sk->sk_state == TCP_LISTEN))//如果桶结构已经设置了复用标志而 sk 不支持复用或者已经处于监听状态，则将桶结构的标志清除。走到这个位置，说明sock队列肯定不为空
 		tb->fastreuse = 0;
-success:
-	if (!inet_csk(sk)->icsk_bind_hash)
-		inet_bind_hash(sk, tb, snum);
+success://走到这个位置，tb可能是新建的，也可能在hash桶中找到的
+	if (!inet_csk(sk)->icsk_bind_hash)//判断是否已经加入到了bhash桶中
+		inet_bind_hash(sk, tb, snum);//绑定桶结构，将sk挂入tb->owner链表中
 	BUG_TRAP(inet_csk(sk)->icsk_bind_hash == tb);
 	ret = 0;
 

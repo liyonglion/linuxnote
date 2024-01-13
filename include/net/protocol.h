@@ -70,23 +70,23 @@ struct inet6_protocol
 struct inet_protosw {
 	struct list_head list;
 
-        /* These two fields form the lookup key.  */
-	unsigned short	 type;	   /* This is the 2nd argument to socket(2). */
-	unsigned short	 protocol; /* This is the L4 protocol number.  */
+        /* 下面两个变量用于校对使用  */
+	unsigned short	 type;	   /* This is the 2nd argument to socket(2). 对应socket的类型 */
+	unsigned short	 protocol; /* This is the L4 protocol number. IP协议编码 */
 
-	struct proto	 *prot;
-	const struct proto_ops *ops;
+	struct proto	 *prot; //对应的协议结构体指针。例如：TCP_prot,udp_prot
+	const struct proto_ops *ops; //对应协议的函数操作表指针
   
 	int              capability; /* Which (if any) capability do
 				      * we need to use this socket
-				      * interface?
+				      * interface? 兼容性，标志是否可以使用改socket
                                       */
-	char             no_check;   /* checksum on rcv/xmit/none? */
-	unsigned char	 flags;      /* See INET_PROTOSW_* below.  */
+	char             no_check;   /* checksum on rcv/xmit/none? 是否在接收和发送过程中使用检验和*/
+	unsigned char	 flags;      /* See INET_PROTOSW_* below. 标志位 */
 };
-#define INET_PROTOSW_REUSE 0x01	     /* Are ports automatically reusable? */
-#define INET_PROTOSW_PERMANENT 0x02  /* Permanent protocols are unremovable. */
-#define INET_PROTOSW_ICSK      0x04  /* Is this an inet_connection_sock? */
+#define INET_PROTOSW_REUSE 0x01	     /* Are ports automatically reusable? 端口是否可以自动重用 */
+#define INET_PROTOSW_PERMANENT 0x02  /* Permanent protocols are unremovable. 不能移除的协议 */
+#define INET_PROTOSW_ICSK      0x04  /* Is this an inet_connection_sock?  这是一个inet_connection_sock类型*/
 
 extern struct net_protocol *inet_protocol_base;
 extern struct net_protocol *inet_protos[MAX_INET_PROTOS];

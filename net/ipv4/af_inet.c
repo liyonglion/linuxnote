@@ -234,10 +234,11 @@ void build_ehash_secret(void)
 {
 	u32 rnd;
 	do {
-		get_random_bytes(&rnd, sizeof(rnd));
+		//get_random_bytes是取得一个随机数，也称作“熵”该值用于加密使用
+		get_random_bytes(&rnd, sizeof(rnd));//获得随机数
 	} while (rnd == 0);
 	spin_lock_bh(&inetsw_lock);
-	if (!inet_ehash_secret)
+	if (!inet_ehash_secret)//将随机数保存在inet_ehash_secret
 		inet_ehash_secret = rnd;
 	spin_unlock_bh(&inetsw_lock);
 }
@@ -275,29 +276,35 @@ static int inet_create(struct net *net, struct socket *sock, int protocol)
 	char answer_no_check;
 	int try_loading_module = 0;
 	int err;
-
+	//检查socket类型和加密字符。
 	if (sock->type != SOCK_RAW &&
 	    sock->type != SOCK_DGRAM &&
 	    !inet_ehash_secret)
 		build_ehash_secret();
 
-	sock->state = SS_UNCONNECTED;
+	sock->state = SS_UNCONNECTED; //设置 socket 的状态为“未连接状态
 
 	/* Look for the requested type/protocol pair. */
 	answer = NULL;
 lookup_protocol:
 	err = -ESOCKTNOSUPPORT;
 	rcu_read_lock();
+	//inetsw的值是在inet_init()中通过遍历inetsw_array全局变量赋值得到
 	list_for_each_rcu(p, &inetsw[sock->type]) {
+		// 使得answer 指向了TCP协议的 inet_protosw 结构
 		answer = list_entry(p, struct inet_protosw, list);
 
-		/* Check the non-wild match. */
+		/* 检查协议编码是否与内核已经注册的协议相同 */
+		/* server_fd = socket(AF INET，SOCK STREAM，0)
+		由此可见,传递到inet_create()函数的参数 protocol在服务器程序中指定为0查找过程中,在数组inetsw门]中根据 sock-> type,
+		服务器指定为 SOCK_STREAM 即TCP协议类型，找到了协议类型的所在的队列。此时protocol=0，与answer->protoco不同。
+		*/
 		if (protocol == answer->protocol) {
 			if (protocol != IPPROTO_IP)
 				break;
 		} else {
-			/* Check for the two wild cases. */
-			if (IPPROTO_IP == protocol) {
+			/* 检查是否属 IP 协议 IPPROTO_IP枚举值为 0*/
+			if (IPPROTO_IP == protocol) {//protocol=0走到这个位置，将具体的协议赋值到protocol。例如IPPROTO_TCP=6（IP报文头协议类型），IPPROTO_UDP=17（IP报文头协议类型）
 				protocol = answer->protocol;
 				break;
 			}
@@ -307,7 +314,7 @@ lookup_protocol:
 		err = -EPROTONOSUPPORT;
 		answer = NULL;
 	}
-
+	//没有找到对应的协议类型
 	if (unlikely(answer == NULL)) {
 		if (try_loading_module < 2) {
 			rcu_read_unlock();
@@ -331,33 +338,35 @@ lookup_protocol:
 	}
 
 	err = -EPERM;
+	//兼容性进行检测。TCP udp的能力都是-1，
 	if (answer->capability > 0 && !capable(answer->capability))
 		goto out_rcu_unlock;
 
 	err = -EAFNOSUPPORT;
 	if (!inet_netns_ok(net, protocol))
 		goto out_rcu_unlock;
-
-	sock->ops = answer->ops;
-	answer_prot = answer->prot;
-	answer_no_check = answer->no_check;
-	answer_flags = answer->flags;
+	//对struct socket->ops 进行赋值
+	sock->ops = answer->ops;//例如inet_stream_ops,inet_dgram_ops,inet_sockraw_opt。具体参看inetsw_array全局变量
+	answer_prot = answer->prot;//例如tcp_prot,udp_prot,raw_prot。具体参看inetsw_array全局变量
+	answer_no_check = answer->no_check;//具体参看inetsw_array全局变量对应成员
+	answer_flags = answer->flags;//具体参看inetsw_array全局变量对应成员
 	rcu_read_unlock();
 
 	BUG_TRAP(answer_prot->slab != NULL);
 
 	err = -ENOBUFS;
+	//创建struct sock对象
 	sk = sk_alloc(net, PF_INET, GFP_KERNEL, answer_prot);
 	if (sk == NULL)
 		goto out;
 
 	err = 0;
 	sk->sk_no_check = answer_no_check;
-	if (INET_PROTOSW_REUSE & answer_flags)
+	if (INET_PROTOSW_REUSE & answer_flags)//协议是否自动支持端口复用？udp支持，TCP不支持自动
 		sk->sk_reuse = 1;
 
 	inet = inet_sk(sk);
-	inet->is_icsk = (INET_PROTOSW_ICSK & answer_flags) != 0;
+	inet->is_icsk = (INET_PROTOSW_ICSK & answer_flags) != 0;//标识是否是inet_connection_sock类型
 
 	if (SOCK_RAW == sock->type) {
 		inet->num = protocol;
@@ -371,14 +380,14 @@ lookup_protocol:
 		inet->pmtudisc = IP_PMTUDISC_WANT;
 
 	inet->id = 0;
-
+	//对sk进行初始化
 	sock_init_data(sock, sk);
 
 	sk->sk_destruct	   = inet_sock_destruct;
 	sk->sk_family	   = PF_INET;
 	sk->sk_protocol	   = protocol;
 	sk->sk_backlog_rcv = sk->sk_prot->backlog_rcv;
-
+	//初始化struct inet_sock
 	inet->uc_ttl	= -1;
 	inet->mc_loop	= 1;
 	inet->mc_ttl	= 1;
@@ -391,13 +400,13 @@ lookup_protocol:
 		/* It assumes that any protocol which allows
 		 * the user to assign a number at socket
 		 * creation time automatically
-		 * shares.
+		 * shares.这里假设协议允许用户指定 socket 的编号，创建时自动共享
 		 */
 		inet->sport = htons(inet->num);
 		/* Add to protocol hash chains. */
 		sk->sk_prot->hash(sk);
 	}
-
+	//调用具体的TCP层socket类型进行初始化。例如TCP中init为tcp_v4_init_sock()，这个主要初始化struct tcp_sock 对象
 	if (sk->sk_prot->init) {
 		err = sk->sk_prot->init(sk);
 		if (err)
@@ -455,7 +464,9 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	int chk_addr_ret;
 	int err;
 
-	/* If the socket has its own bind function then use it. (RAW) */
+	/* If the socket has its own bind function then use it. (RAW) 
+	如果 socket 提供了自己的绑定函数就使用它 (一般用于原始套接字).TCP和udp没有自己定义bind函数
+	*/
 	if (sk->sk_prot->bind) {
 		err = sk->sk_prot->bind(sk, uaddr, addr_len);
 		goto out;
@@ -463,7 +474,7 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	err = -EINVAL;
 	if (addr_len < sizeof(struct sockaddr_in))
 		goto out;
-
+	//在路由中检测地址类型。实际调用 __inet_dev_addr_type()
 	chk_addr_ret = inet_addr_type(sock_net(sk), addr->sin_addr.s_addr);
 
 	/* Not specified by any standard per-se, however it breaks too
@@ -477,13 +488,14 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	if (!sysctl_ip_nonlocal_bind &&
 	    !inet->freebind &&
 	    addr->sin_addr.s_addr != htonl(INADDR_ANY) &&
-	    chk_addr_ret != RTN_LOCAL &&
-	    chk_addr_ret != RTN_MULTICAST &&
-	    chk_addr_ret != RTN_BROADCAST)
+	    chk_addr_ret != RTN_LOCAL && //是否单播类型
+	    chk_addr_ret != RTN_MULTICAST && //是否多播类型
+	    chk_addr_ret != RTN_BROADCAST) //是否广播类型
 		goto out;
 
-	snum = ntohs(addr->sin_port);
+	snum = ntohs(addr->sin_port);//取得端口号
 	err = -EACCES;
+	//当绑定的端口小于1024，检查是否有权限进行绑定
 	if (snum && snum < PROT_SOCK && !capable(CAP_NET_BIND_SERVICE))
 		goto out;
 
@@ -498,31 +510,34 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 
 	/* Check these errors (active socket, double bind). */
 	err = -EINVAL;
+	//出现2种情况：1. 端口首次绑定，此时TCP连接状态必须为TCP_CLOSE；2. 防止多次绑定
 	if (sk->sk_state != TCP_CLOSE || inet->num)
 		goto out_release_sock;
 
 	inet->rcv_saddr = inet->saddr = addr->sin_addr.s_addr;
+	//多播和广播，没有源地址。
 	if (chk_addr_ret == RTN_MULTICAST || chk_addr_ret == RTN_BROADCAST)
 		inet->saddr = 0;  /* Use device */
 
 	/* Make sure we are allowed to bind here. */
+	//检查是否运行绑定
 	if (sk->sk_prot->get_port(sk, snum)) {
-		inet->saddr = inet->rcv_saddr = 0;
+		inet->saddr = inet->rcv_saddr = 0;//失败清空地址
 		err = -EADDRINUSE;
 		goto out_release_sock;
 	}
 
-	if (inet->rcv_saddr)
+	if (inet->rcv_saddr)//如果已经设置地址就增加锁标志，表示已经绑定了地址
 		sk->sk_userlocks |= SOCK_BINDADDR_LOCK;
-	if (snum)
+	if (snum)//如果端口也已经确定也要增加锁标志，表示已经绑定了端口
 		sk->sk_userlocks |= SOCK_BINDPORT_LOCK;
-	inet->sport = htons(inet->num);
-	inet->daddr = 0;
-	inet->dport = 0;
+	inet->sport = htons(inet->num);//记录端口
+	inet->daddr = 0;//初始化目标地址
+	inet->dport = 0; //初始化目标端口
 	sk_dst_reset(sk);
 	err = 0;
 out_release_sock:
-	release_sock(sk);
+	release_sock(sk);//解锁，并唤醒 sock 锁上的其他进程
 out:
 	return err;
 }
@@ -937,7 +952,7 @@ static struct inet_protosw inetsw_array[] =
 {
 	{
 		.type =       SOCK_STREAM,
-		.protocol =   IPPROTO_TCP,
+		.protocol =   IPPROTO_TCP,//协议标识码。此处并不是创建socket的时候传入的protocol字段
 		.prot =       &tcp_prot,
 		.ops =        &inet_stream_ops,
 		.capability = -1,
@@ -978,7 +993,7 @@ void inet_register_protosw(struct inet_protosw *p)
 	struct list_head *last_perm;
 
 	spin_lock_bh(&inetsw_lock);
-
+	//有效性检查
 	if (p->type >= SOCK_MAX)
 		goto out_illegal;
 
@@ -988,11 +1003,11 @@ void inet_register_protosw(struct inet_protosw *p)
 	list_for_each(lh, &inetsw[p->type]) {
 		answer = list_entry(lh, struct inet_protosw, list);
 
-		/* Check only the non-wild match. */
+		/* Check only the non-wild match. 查找匹配的队列*/
 		if (INET_PROTOSW_PERMANENT & answer->flags) {
 			if (protocol == answer->protocol)
 				break;
-			last_perm = lh;
+			last_perm = lh;//将inetsw_array中的元素逐一放入到数组队列inetsw中
 		}
 
 		answer = NULL;
@@ -1006,6 +1021,7 @@ void inet_register_protosw(struct inet_protosw *p)
 	 * non-permanent entry.  This means that when we remove this entry, the
 	 * system automatically returns to the old behavior.
 	 */
+	//插入到队列中
 	list_add_rcu(&p->list, last_perm);
 out:
 	spin_unlock_bh(&inetsw_lock);
@@ -1422,7 +1438,7 @@ static int __init inet_init(void)
 	/*
 	 *	Tell SOCKET that we are alive...
 	 */
-
+	//注册af_net协议族
 	(void)sock_register(&inet_family_ops);
 
 	/*
@@ -1443,7 +1459,7 @@ static int __init inet_init(void)
 	/* Register the socket-side information for inet_create. */
 	for (r = &inetsw[0]; r < &inetsw[SOCK_MAX]; ++r)
 		INIT_LIST_HEAD(r);
-
+	//处理inetsw_array数组中的元素，并将他们依次登记到数组inetsw中
 	for (q = inetsw_array; q < &inetsw_array[INETSW_ARRAY_LEN]; ++q)
 		inet_register_protosw(q);
 
