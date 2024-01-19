@@ -49,40 +49,47 @@
 
 struct fib_nh;
 struct inet_peer;
+/*
+不要将路由函数表结构 fib_table 与 rtable 混为一谈,fib table内部几乎全是函数指针,它提供了查询或者创建路由的方法;
+rtable 则装载着具体路由内容，这些内容都是通过 fib table 的函数查找并初始化到 rtable中的。
+*/
 struct rtable
 {
 	union
 	{
-		struct dst_entry	dst;
+		struct dst_entry	dst;// 这是目的路由项
 	} u;
 
-	/* Cache lookup keys */
-	struct flowi		fl;
+	/* Cache lookup keys路由缓存查找相关的匹配条件，该结构体中存放了路由缓存匹配的所有参数 */
+	struct flowi		fl;// 注意在cache中的查找主要是通过路由键值和下面的信息
 
-	struct in_device	*idev;
+	struct in_device	*idev;// 设备
 	
-	int			rt_genid;
+	int			rt_genid;//路由ID
+	/*相应的取值有RTCF_NOTIFY、RTCF_LOCAL、RTCF_BROADCAST、RTCF_MULTICAST、RTCF_REDIRECTED等*/
 	unsigned		rt_flags;
+	/*路由项的类型，相应的取值有RTN_UNSPEC、RTN_UNICAST、RTN_LOCAL、RTN_BROADCAST、RTN_MULTICAST等*/
 	__u16			rt_type;
 
-	__be32			rt_dst;	/* Path destination	*/
-	__be32			rt_src;	/* Path source		*/
-	int			rt_iif;
+	__be32			rt_dst;	/* Path destination 目的地址	*/
+	__be32			rt_src;	/* Path source源地址		*/
+	int			rt_iif; //入端口
+
 
 	/* Info on neighbour */
-	__be32			rt_gateway;
+	__be32			rt_gateway; //目的地址或者下一跳网关地址
 
 	/* Miscellaneous cached information */
 	__be32			rt_spec_dst; /* RFC1122 specific destination */
-	struct inet_peer	*peer; /* long-living peer info */
+	struct inet_peer	*peer; /* long-living peer info 存储ip peer相关的信息*/
 };
 
 struct ip_rt_acct
 {
-	__u32 	o_bytes;
-	__u32 	o_packets;
-	__u32 	i_bytes;
-	__u32 	i_packets;
+	__u32 	o_bytes;//发出的字节数
+	__u32 	o_packets; //发出的包数
+	__u32 	i_bytes; //接收的字节数
+	__u32 	i_packets; //接收的包数
 };
 
 struct rt_cache_stat 
@@ -149,29 +156,30 @@ static inline int ip_route_connect(struct rtable **rp, __be32 dst,
 				   __be16 sport, __be16 dport, struct sock *sk,
 				   int flags)
 {
-	struct flowi fl = { .oif = oif,
-			    .mark = sk->sk_mark,
-			    .nl_u = { .ip4_u = { .daddr = dst,
-						 .saddr = src,
-						 .tos   = tos } },
-			    .proto = protocol,
+	//初始化查询路由键值
+	struct flowi fl = { .oif = oif,//出接口索引
+			    .mark = sk->sk_mark, //设置的mark值
+			    .nl_u = { .ip4_u = { .daddr = dst,//目标地址
+						 .saddr = src,//源地址
+						 .tos   = tos } }, //tos
+			    .proto = protocol, //协议号
 			    .uli_u = { .ports =
-				       { .sport = sport,
-					 .dport = dport } } };
+				       { .sport = sport, //源端口
+					 .dport = dport } } }; //目标端口
 
 	int err;
 	struct net *net = sock_net(sk);
-	if (!dst || !src) {
+	if (!dst || !src) {//如果没有指定源地址或者目的地址，则要查询路由表
 		err = __ip_route_output_key(net, rp, &fl);
 		if (err)
 			return err;
-		fl.fl4_dst = (*rp)->rt_dst;
-		fl.fl4_src = (*rp)->rt_src;
-		ip_rt_put(*rp);
+		fl.fl4_dst = (*rp)->rt_dst;//使用路由的目标地址
+		fl.fl4_src = (*rp)->rt_src; //使用路由的源地址
+		ip_rt_put(*rp);//递减路由项计数器
 		*rp = NULL;
 	}
 	security_sk_classify_flow(sk, &fl);
-	return ip_route_output_flow(net, rp, &fl, sk, flags);
+	return ip_route_output_flow(net, rp, &fl, sk, flags);//再次查找并调整地址
 }
 
 static inline int ip_route_newports(struct rtable **rp, u8 protocol,

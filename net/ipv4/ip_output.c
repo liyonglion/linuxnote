@@ -1407,6 +1407,7 @@ void ip_send_reply(struct sock *sk, struct sk_buff *skb, struct ip_reply_arg *ar
 
 void __init ip_init(void)
 {
+	//初始化IP路由表
 	ip_rt_init();
 	inet_initpeers();
 

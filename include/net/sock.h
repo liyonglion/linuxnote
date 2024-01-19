@@ -204,7 +204,7 @@ struct sock {
 	struct sock_common	__sk_common;//与inet_timewait_sock共享使用
 #define sk_family		__sk_common.skc_family //地址族
 #define sk_state		__sk_common.skc_state //连接状态
-#define sk_reuse		__sk_common.skc_reuse //确定地址复用
+#define sk_reuse		__sk_common.skc_reuse //确定地址复用。UDP是允许自动复用端口，所以初始化的时候为1；TCP不允许自动绑定，但是可以通过setsocketopt()来复用端口，初始化为0.
 #define sk_bound_dev_if		__sk_common.skc_bound_dev_if //绑定设备ID
 #define sk_node			__sk_common.skc_node //用于链入ehash表，也就是ehash（ESTABLISHED状态的hash表）中
 #define sk_bind_node		__sk_common.skc_bind_node //用于链入bhash表。绑定的端口会加入到bbash中，key是监听的端口号，value是struct sock *
@@ -229,7 +229,7 @@ struct sock {
 		struct sk_buff *head;//记录最先收到的数据包
 		struct sk_buff *tail;//记录最后首都奥的数据包
 	} sk_backlog;//backlog队列
-	wait_queue_head_t	*sk_sleep; //sock等待队列
+	wait_queue_head_t	*sk_sleep; //sock等待队列。等于struc socket->wait
 	struct dst_entry	*sk_dst_cache; //路由项缓存
 	struct xfrm_policy	*sk_policy[2]; //流策略
 	rwlock_t		sk_dst_lock; //路由项缓存锁
@@ -274,13 +274,13 @@ struct sock {
 	void			*sk_security; //安全模式相关
 	__u32			sk_mark; //通用数据包掩码
 	/* XXX 4 bytes hole on 64 bit */
-	void			(*sk_state_change)(struct sock *sk); //在 sock 的状态改变后要调用的函数
-	void			(*sk_data_ready)(struct sock *sk, int bytes); //在数据被处理后要调用的函数。tcp表示tcp_v4_rcv,udp表示udp_rcv
-	void			(*sk_write_space)(struct sock *sk); //当发送空间可以使用后,调用的函数
-	void			(*sk_error_report)(struct sock *sk); //处理错误函数
+	void			(*sk_state_change)(struct sock *sk); //在 sock 的状态改变后要调用的函数。在inet_create()->sock_init_data()中进行赋值为sock_def_wakeup()
+	void			(*sk_data_ready)(struct sock *sk, int bytes); //在数据被处理后要调用的函数。tcp表示tcp_v4_rcv,udp表示udp_rcv。在inet_create()->sock_init_data()中进行赋值为 sock_def_readable()
+	void			(*sk_write_space)(struct sock *sk); //当发送空间可以使用后,调用的函数. 在inet_create()->sock_init_data()中进行赋值为sock_def_write_space()
+	void			(*sk_error_report)(struct sock *sk); //处理错误函数. 在inet_create()->sock_init_data()中进行赋值为sock_def_error_report()
   	int			(*sk_backlog_rcv)(struct sock *sk,
-						  struct sk_buff *skb);  //处理首次接收SYNC报文的函数
-	void                    (*sk_destruct)(struct sock *sk); //sock销毁函数
+						  struct sk_buff *skb);  //处理首次接收SYNC报文的函数。在inet_create中进行赋值
+	void                    (*sk_destruct)(struct sock *sk); //sock销毁函数.在inet_create()中进行赋值为inet_sock_destruct()
 };
 
 /*
@@ -695,8 +695,8 @@ static inline struct kiocb *siocb_to_kiocb(struct sock_iocb *si)
 }
 
 struct socket_alloc {
-	struct socket socket;
-	struct inode vfs_inode;
+	struct socket socket; //分配的struct socket结构
+	struct inode vfs_inode; //分配的文件inode节点结构
 };
 
 static inline struct socket *SOCKET_I(struct inode *inode)

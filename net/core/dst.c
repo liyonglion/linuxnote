@@ -160,26 +160,33 @@ int dst_discard(struct sk_buff *skb)
 }
 EXPORT_SYMBOL(dst_discard);
 
+/*
+对于ipv4时候ops是ipv4_dst_ops
+*/
 void * dst_alloc(struct dst_ops * ops)
 {
 	struct dst_entry * dst;
-
+	// 判断已申请的路由缓存的个数是否已经大于路由缓存的最大值时，则调用垃圾回收函数，强制进行缓存释放。若强制释放失败，则程序反悔失败。
 	if (ops->gc && atomic_read(&ops->entries) > ops->gc_thresh) {
 		if (ops->gc(ops))
 			return NULL;
 	}
+	/*
+		此处通过函数kmem_cache_zalloc，申请内存大小为ops->kmem_cachep->size的内存，即申请ipv4_dst_ops.kmem_cachep->size大小的内存，而在ip_rt_init中，
+		通过调用函数kmem_cache_create创建缓存时，即将ipv4_dst_ops.kmem_cachep->size的值设置为sizeof(struct rtable)。因此此处即申请了一个struct rtable大小的内存空间。
+	*/
 	dst = kmem_cache_zalloc(ops->kmem_cachep, GFP_ATOMIC);
 	if (!dst)
 		return NULL;
-	atomic_set(&dst->__refcnt, 0);
-	dst->ops = ops;
-	dst->lastuse = jiffies;
-	dst->path = dst;
-	dst->input = dst->output = dst_discard;
+	atomic_set(&dst->__refcnt, 0);//设置引用计数
+	dst->ops = ops;//保存ops
+	dst->lastuse = jiffies;//保存最后使用的时间
+	dst->path = dst;//保存路径
+	dst->input = dst->output = dst_discard;//初始赋值为dst_discard
 #if RT_CACHE_DEBUG >= 2
 	atomic_inc(&dst_total);
 #endif
-	atomic_inc(&ops->entries);
+	atomic_inc(&ops->entries);//增加已申请的路由缓存个数
 	return dst;
 }
 

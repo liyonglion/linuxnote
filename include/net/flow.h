@@ -10,17 +10,17 @@
 #include <linux/in6.h>
 #include <asm/atomic.h>
 
-struct flowi {
-	int	oif;
-	int	iif;
-	__u32	mark;
-
+struct flowi {//路由查找相关的数据结构
+	int	oif;/*出口设备*/
+	int	iif;/*入口设备*/
+	__u32	mark;/*mark值*/
+	/*三层相关的成员，对于ipv4有目的ip地址、源ip地址、tos、scope等*/
 	union {
 		struct {
-			__be32			daddr;
-			__be32			saddr;
+			__be32			daddr; //目标地址
+			__be32			saddr; //源地址
 			__u8			tos;
-			__u8			scope;
+			__u8			scope; 
 		} ip4_u;
 		
 		struct {
@@ -35,17 +35,17 @@ struct flowi {
 			__u8			scope;
 		} dn_u;
 	} nl_u;
-#define fld_dst		nl_u.dn_u.daddr
-#define fld_src		nl_u.dn_u.saddr
-#define fld_scope	nl_u.dn_u.scope
+#define fld_dst		nl_u.dn_u.daddr 
+#define fld_src		nl_u.dn_u.saddr 
+#define fld_scope	nl_u.dn_u.scope 
 #define fl6_dst		nl_u.ip6_u.daddr
 #define fl6_src		nl_u.ip6_u.saddr
 #define fl6_flowlabel	nl_u.ip6_u.flowlabel
-#define fl4_dst		nl_u.ip4_u.daddr
-#define fl4_src		nl_u.ip4_u.saddr
+#define fl4_dst		nl_u.ip4_u.daddr//IPv4目标地址
+#define fl4_src		nl_u.ip4_u.saddr//IPv4源地址
 #define fl4_tos		nl_u.ip4_u.tos
 #define fl4_scope	nl_u.ip4_u.scope
-
+	/*四层协议类型与四层协议相关的成员(源、目的端口)等*/
 	__u8	proto;
 	__u8	flags;
 	union {

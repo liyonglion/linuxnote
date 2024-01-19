@@ -242,12 +242,14 @@ static inline struct tcp_request_sock *tcp_rsk(const struct request_sock *req)
 struct tcp_sock {
 	/* inet_connection_sock has to be the first member of tcp_sock */
 	struct inet_connection_sock	inet_conn;
-	u16	tcp_header_len;	/* Bytes of tcp header to send		*/
-	u16	xmit_size_goal;	/* Goal for segmenting output packets	*/
+	u16	tcp_header_len;	/* Bytes of tcp header to send	发送的 tcp 头部字节数	*/
+	u16	xmit_size_goal;	/* Goal for segmenting output packets 分段传送的数据包数量	*/
 
 /*
  *	Header prediction flags
  *	0x5?10 << 16 + snd_wnd in net byte order
+ 头部的预置位
+0x5? 10 << 16 + snd wnd in net byte order
  */
 	__be32	pred_flags;
 
@@ -255,26 +257,27 @@ struct tcp_sock {
  *	RFC793 variables by their proper names. This means you can
  *	read the code and the spec side by side (and laugh ...)
  *	See RFC793 and RFC1122. The RFC writes these in capitals.
+ 根据 REC793标准定义的变量。可以参考 REC793 和 REC1122了解这些内容
  */
- 	u32	rcv_nxt;	/* What we want to receive next 	*/
-	u32	copied_seq;	/* Head of yet unread data		*/
-	u32	rcv_wup;	/* rcv_nxt on last window update sent	*/
- 	u32	snd_nxt;	/* Next sequence we send		*/
+ 	u32	rcv_nxt;	/* What we want to receive next 下一个要接收的目标	*/
+	u32	copied_seq;	/* Head of yet unread data	代表还没有读取的数据	*/
+	u32	rcv_wup;	/* rcv_nxt on last window update sent rcv_nxt 在最后一次窗口更新时内容	*/
+ 	u32	snd_nxt;	/* Next sequence we send	下-个要发送的目标	*/
 
- 	u32	snd_una;	/* First byte we want an ack for	*/
- 	u32	snd_sml;	/* Last byte of the most recently transmitted small packet */
-	u32	rcv_tstamp;	/* timestamp of last received ACK (for keepalives) */
-	u32	lsndtime;	/* timestamp of last sent data packet (for restart window) */
+ 	u32	snd_una;	/* First byte we want an ack for 第一个要 ACK的字节	*/
+ 	u32	snd_sml;	/* Last byte of the most recently transmitted small packet 最近发送数据包中的尾字节 */
+	u32	rcv_tstamp;	/* timestamp of last received ACK (for keepalives) 最后一次接收到 ACK 的时间 */
+	u32	lsndtime;	/* timestamp of last sent data packet (for restart window) 最后一次发送数据包的时间 */
 
 	/* Data for direct copy to user */
 	struct {
-		struct sk_buff_head	prequeue;
-		struct task_struct	*task;
-		struct iovec		*iov;
-		int			memory;
-		int			len;
+		struct sk_buff_head	prequeue; //预处理队列
+		struct task_struct	*task; //预处理进程
+		struct iovec		*iov; //用户程序(应用程序)接收数据的缓冲区
+		int			memory; //预处理数据包计数器
+		int			len; //预处理长度
 #ifdef CONFIG_NET_DMA
-		/* members for async copy */
+		/* members for async copy 异步复制的内容*/
 		struct dma_chan		*dma_chan;
 		int			wakeup;
 		struct dma_pinned_list	*pinned_list;
@@ -282,18 +285,18 @@ struct tcp_sock {
 #endif
 	} ucopy;
 
-	u32	snd_wl1;	/* Sequence for window update		*/
-	u32	snd_wnd;	/* The window we expect to receive	*/
-	u32	max_window;	/* Maximal window ever seen from peer	*/
-	u32	mss_cache;	/* Cached effective mss, not including SACKS */
+	u32	snd_wl1;	/* Sequence for window update	窗口更新的顺序	*/
+	u32	snd_wnd;	/* The window we expect to receive 期望接收的窗口	*/
+	u32	max_window;	/* Maximal window ever seen from peer 对方的最大的窗口	*/
+	u32	mss_cache;	/* Cached effective mss, not including SACKS 有效的 mss缓存，不包括 SACKS */
 
-	u32	window_clamp;	/* Maximal window to advertise		*/
-	u32	rcv_ssthresh;	/* Current window clamp			*/
+	u32	window_clamp;	/* Maximal window to advertise 对外公布的最大窗口		*/
+	u32	rcv_ssthresh;	/* Current window clamp		当前窗口	*/
 
-	u32	frto_highmark;	/* snd_nxt when RTO occurred */
-	u8	reordering;	/* Packet reordering metric.		*/
-	u8	frto_counter;	/* Number of new acks after RTO */
-	u8	nonagle;	/* Disable Nagle algorithm?             */
+	u32	frto_highmark;	/* snd_nxt when RTO occurred 在RTO时的snd_nxt */
+	u8	reordering;	/* Packet reordering metric.	预设的数据包数量	*/
+	u8	frto_counter;	/* Number of new acks after RTO  RTO 后的 ack 次数*/
+	u8	nonagle;	/* Disable Nagle algorithm?    是否使用Nagle算法         */
 	u8	keepalive_probes; /* num of allowed keep alive probes	*/
 
 /* RTT measurement */
@@ -303,28 +306,29 @@ struct tcp_sock {
 	u32	rttvar;		/* smoothed mdev_max			*/
 	u32	rtt_seq;	/* sequence number to update rttvar	*/
 
-	u32	packets_out;	/* Packets which are "in flight"	*/
-	u32	retrans_out;	/* Retransmitted packets out		*/
+	u32	packets_out;	/* Packets which are "in flight" 处于飞行中的数据包数量	*/
+	u32	retrans_out;	/* Retransmitted packets out	转发的数据包数量	*/
 /*
  *      Options received (usually on last packet, some only on SYN packets).
+ 		接收选项
  */
 	struct tcp_options_received rx_opt;
 
 /*
  *	Slow start and congestion control (see also Nagle, and Karn & Partridge)
  */
- 	u32	snd_ssthresh;	/* Slow start size threshold		*/
- 	u32	snd_cwnd;	/* Sending congestion window		*/
-	u32	snd_cwnd_cnt;	/* Linear increase counter		*/
-	u32	snd_cwnd_clamp; /* Do not allow snd_cwnd to grow above this */
+ 	u32	snd_ssthresh;	/* Slow start size threshold	慢起动的起点值	*/
+ 	u32	snd_cwnd;	/* Sending congestion window	发送的阻塞窗口	*/
+	u32	snd_cwnd_cnt;	/* Linear increase counter	线性计数器	*/
+	u32	snd_cwnd_clamp; /* Do not allow snd_cwnd to grow above this 不允许 snd_cwnd 超过的值 */
 	u32	snd_cwnd_used;
 	u32	snd_cwnd_stamp;
 
-	struct sk_buff_head	out_of_order_queue; /* Out of order segments go here */
+	struct sk_buff_head	out_of_order_queue; /* Out of order segments go here 超出分段规则的队列 */
 
- 	u32	rcv_wnd;	/* Current receiver window		*/
-	u32	write_seq;	/* Tail(+1) of data held in tcp send buffer */
-	u32	pushed_seq;	/* Last pushed seq, required to talk to windows */
+ 	u32	rcv_wnd;	/* Current receiver window	当前接收窗口	*/
+	u32	write_seq;	/* Tail(+1) of data held in tcp send buffer tcp 发送数据的顺序号 */
+	u32	pushed_seq;	/* Last pushed seq, required to talk to windows  最后送出的顺序号，需要通知窗口*/
 
 /*	SACKs data	*/
 	struct tcp_sack_block duplicate_sack[1]; /* D-SACK block */
@@ -369,7 +373,7 @@ struct tcp_sock {
 
 	u32	total_retrans;	/* Total retransmits for entire connection */
 	u32	bytes_acked;	/* Appropriate Byte Counting - RFC3465 */
-
+	//keepalive相关
 	unsigned int		keepalive_time;	  /* time before keep alive takes place */
 	unsigned int		keepalive_intvl;  /* time interval between keep alive probes */
 	int			linger2;
@@ -378,21 +382,21 @@ struct tcp_sock {
 
 	u32	tso_deferred;
 
-/* Receiver side RTT estimation */
+/* Receiver side RTT estimation 计算RTT相关*/
 	struct {
 		u32	rtt;
 		u32	seq;
 		u32	time;
 	} rcv_rtt_est;
 
-/* Receiver queue space */
+/* Receiver queue space 接收队列空间 */
 	struct {
 		int	space;
 		u32	seq;
 		u32	time;
 	} rcvq_space;
 
-/* TCP-specific MTU probe information. */
+/* TCP-specific MTU probe information. TCP 指定的MTU检验内容*/
 	struct {
 		u32		  probe_seq_start;
 		u32		  probe_seq_end;

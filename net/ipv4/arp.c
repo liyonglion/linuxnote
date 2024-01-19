@@ -498,7 +498,33 @@ int arp_find(unsigned char *haddr, struct sk_buff *skb)
 }
 
 /* END OF OBSOLETE FUNCTIONS */
-
+/*
+功能:实现路由缓存与邻居项的绑定操作。
+1.当该路由缓存项没有关联相应的邻居项时，
+  则根据下一跳ip地址，调用__neigh_lookup_errno查找相应的邻居项
+  (调用__neigh_lookup_errno后，当邻居项不存在时，则会调用函数neigh_create
+  创建邻居项；若存在相应的邻居项，则返回该邻居项)
+2.将邻居项与路由缓存项进行关联。
+当本地网卡收到需要转发的数据时，其走向如下：
+a.调用ip_rcv函数，对三层数据进行处理
+b.进入netfilter的prerouting链，进行netfilter的处理（netfliter子系统）
+c.netfilter模块准许通过后，则调用ip_rcv_finish继续处理
+d.在ip_rcv_finish中，若数据还没有和路由缓存项关联，则调用函数ip_route_input进行路由缓存项以及路由缓存的查找。当路由缓存没有查找到后，
+	则会调用ip_route_input_slow进行路由项的查找，若查找到路由项，则会调用ip_mkroute_input创建路由缓存项，并在调用rt_intern_hash中，
+	通过arp_bind_neighbour将路由缓存项与邻居项进行绑定，并调用__mkroute_input设置dst的input、output函数，并将skb与路由缓存项进行绑定
+e.通过调用dst_input，进入skb->dst->input函数，即2.1中的ip_forward函数。
+f.在ip_forward函数中，进行合法性判断后，则会进入netfilter的forward链
+g.netfilter通过后，则调用ip_forward_finish，通过dst_output，调用到2.1中的ip_output函数
+h.进入netfilter的post链，若准许通过则调用ip_finish_output
+i.决定是否进行分段操作，最后调用函数ip_finish_output2
+j.在ip_finish_output2里，则会根据数据包关联的路由缓存项，找到缓存项对应的邻居项，并调用neighbour->output，这就进入了邻居子系统了。
+k.对于ipv4来书，其output函数为neigh_resolve_output，在该函数里，若判断下一跳地址对应的mac地址还没有解析到，则会调用neigh_event_send更改邻居项的状态，
+	以发送arp request报文，并将该数据包存入队列中，等解析到mac地址以后再发送出去；若下一跳对应的mac地址已经解析到，则会调用neigh->ops->queue_xmit将数据发送出去，
+	对于ipv4来说即是dev_queue_xmit函数，而在该函数里，则会通过dev->hard_start_xmit调用网卡驱动的发送函数，将数据发送出去。
+————————————————
+版权声明：本文为CSDN博主「jerry_chg」的原创文章，遵循CC 4.0 BY-SA版权协议，转载请附上原文出处链接及本声明。
+原文链接：https://blog.csdn.net/lickylin/article/details/41556363
+*/
 int arp_bind_neighbour(struct dst_entry *dst)
 {
 	struct net_device *dev = dst->dev;

@@ -4294,6 +4294,8 @@ __setup("hashdist=", set_hashdist);
  * - it is assumed that the hash table must contain an exact power-of-2
  *   quantity of entries
  * - limit is the number of hash buckets, not the total allocation size
+alloc_large_system_hash()函数从系统的 bootmem空间分配大量的路由表空间。bootmem 空间是内核启动时使用的内存管理策略，主要指内核使用的页面;其意图是从这部分内存中按页进行分配，
+这部分内存页面是不会被 Linux 交换出去或者回收的，一经分配就不再改变了，可见路由表结构的重要性。
  */
 void *__init alloc_large_system_hash(const char *tablename,
 				     unsigned long bucketsize,

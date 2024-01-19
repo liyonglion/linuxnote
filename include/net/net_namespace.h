@@ -42,8 +42,8 @@ struct net {
 	struct net_device       *loopback_dev;          /* The loopback */
 
 	struct list_head 	dev_base_head;
-	struct hlist_head 	*dev_name_head;
-	struct hlist_head	*dev_index_head;
+	struct hlist_head 	*dev_name_head; //相当于map[hash(dev->name)%NETDEV_HASHBITS]net_dev
+	struct hlist_head	*dev_index_head; //相当于map[ifindex%NETDEV_HASHBITS]net_dev
 
 	/* core fib_rules */
 	struct list_head	rules_ops;

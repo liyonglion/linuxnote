@@ -6,23 +6,23 @@
 #include <linux/fib_rules.h>
 #include <net/flow.h>
 #include <net/rtnetlink.h>
-
+//用于添加类似：ip rule add -m mark 1000 -j DROP
 struct fib_rule
 {
-	struct list_head	list;
-	atomic_t		refcnt;
-	int			ifindex;
-	char			ifname[IFNAMSIZ];
-	u32			mark;
-	u32			mark_mask;
-	u32			pref;
-	u32			flags;
-	u32			table;
-	u8			action;
-	u32			target;
-	struct fib_rule *	ctarget;
+	struct list_head	list;//队列头。用于链入路由规则函数的队列中
+	atomic_t		refcnt;// 计数器
+	int			ifindex; // 网卡索引
+	char			ifname[IFNAMSIZ]; // 网卡名称
+	u32			mark; // mark值。例如在iptable中设置 --set-mark 1000。而在ip rule中指定mark 为1000
+	u32			mark_mask; //mark的掩码值
+	u32			pref; //优先级
+	u32			flags; // 标志
+	u32			table; //路由表ID
+	u8			action; //当前规则动作例如： FR_ACT_GOTO
+	u32			target;//配置goto后，跳转的路由表ID
+	struct fib_rule *	ctarget; //配置goto 后，跳转的那个rule
 	struct rcu_head		rcu;
-	struct net *		fr_net;
+	struct net *		fr_net;//命名空间指针
 };
 
 struct fib_lookup_arg
@@ -34,41 +34,41 @@ struct fib_lookup_arg
 
 struct fib_rules_ops
 {
-	int			family;
-	struct list_head	list;
-	int			rule_size;
-	int			addr_size;
-	int			unresolved_rules;
+	int			family; //协议族。对于ipv4为AF_INET
+	struct list_head	list; //列表头，用于链入网络空间的队列中
+	int			rule_size;//规则结构长度
+	int			addr_size;//地址长度
+	int			unresolved_rules; //
 	int			nr_goto_rules;
-
+	//动作函数指针
 	int			(*action)(struct fib_rule *,
 					  struct flowi *, int,
 					  struct fib_lookup_arg *);
 	int			(*match)(struct fib_rule *,
-					 struct flowi *, int);
+					 struct flowi *, int);//匹配函数指针
 	int			(*configure)(struct fib_rule *,
 					     struct sk_buff *,
 					     struct nlmsghdr *,
 					     struct fib_rule_hdr *,
-					     struct nlattr **);
+					     struct nlattr **);//配置函数指针
 	int			(*compare)(struct fib_rule *,
 					   struct fib_rule_hdr *,
-					   struct nlattr **);
+					   struct nlattr **);//比较函数指针
 	int			(*fill)(struct fib_rule *, struct sk_buff *,
 					struct nlmsghdr *,
-					struct fib_rule_hdr *);
-	u32			(*default_pref)(struct fib_rules_ops *ops);
-	size_t			(*nlmsg_payload)(struct fib_rule *);
+					struct fib_rule_hdr *);//填充函数指针
+	u32			(*default_pref)(struct fib_rules_ops *ops);//查找优先级函数指针
+	size_t			(*nlmsg_payload)(struct fib_rule *);//统计负载数据能力函数指针
 
 	/* Called after modifications to the rules set, must flush
 	 * the route cache if one exists. */
-	void			(*flush_cache)(void);
+	void			(*flush_cache)(void);//修改规则队列后，必须刷新缓存的函数指针
 
-	int			nlgroup;
-	const struct nla_policy	*policy;
-	struct list_head	rules_list;
+	int			nlgroup;// 路由netlink的组划分标识
+	const struct nla_policy	*policy; //netlink的属性优先级
+	struct list_head	rules_list; //路由规则队列
 	struct module		*owner;
-	struct net		*fro_net;
+	struct net		*fro_net; //网络空间结构指针
 };
 
 #define FRA_GENERIC_POLICY \

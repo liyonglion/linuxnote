@@ -31,17 +31,17 @@
 #include <net/tcp.h>
 #include <net/ip_fib.h>
 #include <net/fib_rules.h>
-
+//路由规则
 struct fib4_rule
 {
 	struct fib_rule		common;
-	u8			dst_len;
-	u8			src_len;
-	u8			tos;
-	__be32			src;
-	__be32			srcmask;
-	__be32			dst;
-	__be32			dstmask;
+	u8			dst_len;//目标地址长度
+	u8			src_len;//源地址长度
+	u8			tos;//服务类型
+	__be32			src;//源地址
+	__be32			srcmask;//源地址掩码
+	__be32			dst;//目标地址
+	__be32			dstmask;//目标地址掩码
 #ifdef CONFIG_NET_CLS_ROUTE
 	u32			tclassid;
 #endif
@@ -53,7 +53,11 @@ u32 fib_rules_tclass(struct fib_result *res)
 	return res->r ? ((struct fib4_rule *) res->r)->tclassid : 0;
 }
 #endif
-
+/*支持多路由表的路由查询
+flp： 路由查询条件
+res：查询的结果
+net->ipv4.rules_ops：当前命名空间下所有的路由规则
+*/
 int fib_lookup(struct net *net, struct flowi *flp, struct fib_result *res)
 {
 	struct fib_lookup_arg arg = {
@@ -72,7 +76,7 @@ static int fib4_rule_action(struct fib_rule *rule, struct flowi *flp,
 {
 	int err = -EAGAIN;
 	struct fib_table *tbl;
-
+	//根据action值，执行相应的操作
 	switch (rule->action) {
 	case FR_ACT_TO_TBL:
 		break;
@@ -90,10 +94,10 @@ static int fib4_rule_action(struct fib_rule *rule, struct flowi *flp,
 		err = -EINVAL;
 		goto errout;
 	}
-
+	//注意在支持多路由表的宏中找到fib_get_table函数
 	if ((tbl = fib_get_table(rule->fr_net, rule->table)) == NULL)
 		goto errout;
-
+	//执行fib_table->tb_lookup()函数，开始查询具体的路由表中的路由
 	err = tbl->tb_lookup(tbl, flp, (struct fib_result *) arg->result);
 	if (err > 0)
 		err = -EAGAIN;
@@ -105,19 +109,23 @@ errout:
 static int fib4_rule_match(struct fib_rule *rule, struct flowi *fl, int flags)
 {
 	struct fib4_rule *r = (struct fib4_rule *) rule;
-	__be32 daddr = fl->fl4_dst;
-	__be32 saddr = fl->fl4_src;
-
+	__be32 daddr = fl->fl4_dst;//目标地址
+	__be32 saddr = fl->fl4_src;//源地址
+	//判断源地址和目标地址是否匹配
 	if (((saddr ^ r->src) & r->srcmask) ||
 	    ((daddr ^ r->dst) & r->dstmask))
 		return 0;
-
+	//TOS是否匹配
 	if (r->tos && (r->tos != fl->fl4_tos))
 		return 0;
 
 	return 1;
 }
 
+/*
+	从0开始到RT_TABLE_MAX为止，找到第一个没有创建路由表的id后， 即调用fib_new_table创建此id对应的路由表，并返回路由表的首地址；
+	若从0开始到RT_TABLE_MAX的id，都有创建相应的路由表了，则程序返回NULL
+*/
 static struct fib_table *fib_empty_table(struct net *net)
 {
 	u32 id;
@@ -143,11 +151,17 @@ static int fib4_rule_configure(struct fib_rule *rule, struct sk_buff *skb,
 
 	if (frh->tos & ~IPTOS_TOS_MASK)
 		goto errout;
-
+	//table 0表示由系统来创建一个路由表
 	if (rule->table == RT_TABLE_UNSPEC) {
 		if (rule->action == FR_ACT_TO_TBL) {
 			struct fib_table *table;
-
+			/*
+			若应用层没有设置路由表的id，则调用fib_empty_table创建
+			一个新的路由表，并将新创建的路由表的id传递
+			给rule->table
+			(使用如下命令，即会使系统创建一个新的路由表
+			# ip rule add from 192.168.192.1 table 0)
+			*/
 			table = fib_empty_table(net);
 			if (table == NULL) {
 				err = -ENOBUFS;
@@ -283,13 +297,15 @@ static struct fib_rules_ops fib4_rules_ops_template = {
 static int fib_default_rules_init(struct fib_rules_ops *ops)
 {
 	int err;
-
+	//创建本地路由规则。优先级为0，表示最高优先级，所以首先就会匹配local_rule规则，即进入local路由表中进行路由匹配，其次才会匹配其他的fib rule规则
 	err = fib_default_rule_add(ops, 0, RT_TABLE_LOCAL, FIB_RULE_PERMANENT);
 	if (err < 0)
 		return err;
+	//创建main路由。优先级0x7FFE	
 	err = fib_default_rule_add(ops, 0x7FFE, RT_TABLE_MAIN, 0);
 	if (err < 0)
 		return err;
+	//创建默认路由。优先级0x7FFF	
 	err = fib_default_rule_add(ops, 0x7FFF, RT_TABLE_DEFAULT, 0);
 	if (err < 0)
 		return err;
@@ -300,19 +316,19 @@ int __net_init fib4_rules_init(struct net *net)
 {
 	int err;
 	struct fib_rules_ops *ops;
-
+	//复制模板规则函数表
 	ops = kmemdup(&fib4_rules_ops_template, sizeof(*ops), GFP_KERNEL);
 	if (ops == NULL)
 		return -ENOMEM;
 	INIT_LIST_HEAD(&ops->rules_list);
 	ops->fro_net = net;
 
-	fib_rules_register(ops);
+	fib_rules_register(ops);//链接到网络空间结构中的专用队列
 
-	err = fib_default_rules_init(ops);
+	err = fib_default_rules_init(ops);//创建3个路由规则并链接到专用队列
 	if (err < 0)
 		goto fail;
-	net->ipv4.rules_ops = ops;
+	net->ipv4.rules_ops = ops;//将ops保存到网络空间结构中
 	return 0;
 
 fail:

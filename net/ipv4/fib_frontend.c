@@ -53,14 +53,14 @@ static int __net_init fib4_rules_init(struct net *net)
 {
 	struct fib_table *local_table, *main_table;
 
-	local_table = fib_hash_table(RT_TABLE_LOCAL);
+	local_table = fib_hash_table(RT_TABLE_LOCAL);//创建本地路由函数表
 	if (local_table == NULL)
 		return -ENOMEM;
 
-	main_table  = fib_hash_table(RT_TABLE_MAIN);
+	main_table  = fib_hash_table(RT_TABLE_MAIN);//创建主路由函数表
 	if (main_table == NULL)
 		goto fail;
-
+	//将两个路由表链入队列数组中
 	hlist_add_head_rcu(&local_table->tb_hlist,
 				&net->ipv4.fib_table_hash[TABLE_LOCAL_INDEX]);
 	hlist_add_head_rcu(&main_table->tb_hlist,
@@ -78,20 +78,21 @@ struct fib_table *fib_new_table(struct net *net, u32 id)
 	struct fib_table *tb;
 	unsigned int h;
 
-	if (id == 0)
+	if (id == 0)//没有指定路由表ID，默认查询主路由表
 		id = RT_TABLE_MAIN;
 	tb = fib_get_table(net, id);
-	if (tb)
+	if (tb)//存在直接返回
 		return tb;
-
+	//创建路由表
 	tb = fib_hash_table(id);
 	if (!tb)
 		return NULL;
+	//将路由表链入hash表中	
 	h = id & (FIB_TABLE_HASHSZ - 1);
 	hlist_add_head_rcu(&tb->tb_hlist, &net->ipv4.fib_table_hash[h]);
 	return tb;
 }
-
+//支持多路由表的实现
 struct fib_table *fib_get_table(struct net *net, u32 id)
 {
 	struct fib_table *tb;
@@ -101,12 +102,12 @@ struct fib_table *fib_get_table(struct net *net, u32 id)
 
 	if (id == 0)
 		id = RT_TABLE_MAIN;
-	h = id & (FIB_TABLE_HASHSZ - 1);
+	h = id & (FIB_TABLE_HASHSZ - 1);//确定hash的值，即hash表的索引
 
 	rcu_read_lock();
-	head = &net->ipv4.fib_table_hash[h];
+	head = &net->ipv4.fib_table_hash[h];//确定链表头
 	hlist_for_each_entry_rcu(tb, node, head, tb_hlist) {
-		if (tb->tb_id == id) {
+		if (tb->tb_id == id) {//已经存在对于的fib_table
 			rcu_read_unlock();
 			return tb;
 		}
@@ -120,15 +121,15 @@ void fib_select_default(struct net *net,
 			const struct flowi *flp, struct fib_result *res)
 {
 	struct fib_table *tb;
-	int table = RT_TABLE_MAIN;
+	int table = RT_TABLE_MAIN;//使用主路由表
 #ifdef CONFIG_IP_MULTIPLE_TABLES
 	if (res->r == NULL || res->r->action != FR_ACT_TO_TBL)
 		return;
-	table = res->r->table;
+	table = res->r->table;//使用路由规则指定的路由表
 #endif
-	tb = fib_get_table(net, table);
-	if (FIB_RES_GW(*res) && FIB_RES_NH(*res).nh_scope == RT_SCOPE_LINK)
-		tb->tb_select_default(tb, flp, res);
+	tb = fib_get_table(net, table);//获取路由表
+	if (FIB_RES_GW(*res) && FIB_RES_NH(*res).nh_scope == RT_SCOPE_LINK)//指定了网关和子网范围
+		tb->tb_select_default(tb, flp, res);//相当于调用fn_hash_select_default()函数
 }
 
 static void fib_flush(struct net *net)
@@ -150,7 +151,7 @@ static void fib_flush(struct net *net)
 }
 
 /*
- *	Find the first device with a given source address.
+ *	Find the first device with a given source address.因为是源地址，所以只查询本地路由表
  */
 
 struct net_device * ip_dev_find(struct net *net, __be32 addr)
@@ -164,17 +165,19 @@ struct net_device * ip_dev_find(struct net *net, __be32 addr)
 	res.r = NULL;
 #endif
 
-	local_table = fib_get_table(net, RT_TABLE_LOCAL);
+	local_table = fib_get_table(net, RT_TABLE_LOCAL);//查找本地路由表
+	//如果找到本地路由函数表就调用它的查找函数，查找地址的类型
 	if (!local_table || local_table->tb_lookup(local_table, &fl, &res))
 		return NULL;
+	//如果地址不属于本地类型就返回	
 	if (res.type != RTN_LOCAL)
 		goto out;
-	dev = FIB_RES_DEV(res);
+	dev = FIB_RES_DEV(res);//查找结构中记录着发送设备指针,取得设备指针
 
 	if (dev)
-		dev_hold(dev);
+		dev_hold(dev);//增加网络设备引用计数
 out:
-	fib_res_put(&res);
+	fib_res_put(&res);//释放查找结果
 	return dev;
 }
 
@@ -190,9 +193,10 @@ static inline unsigned __inet_dev_addr_type(struct net *net,
 	struct fib_result	res;
 	unsigned ret = RTN_BROADCAST;
 	struct fib_table *local_table;
-
+	//检查是否0地址，或者广播地址
 	if (ipv4_is_zeronet(addr) || ipv4_is_lbcast(addr))
 		return RTN_BROADCAST;
+	//检查地址是否广播地址	
 	if (ipv4_is_multicast(addr))
 		return RTN_MULTICAST;
 
@@ -200,7 +204,7 @@ static inline unsigned __inet_dev_addr_type(struct net *net,
 	res.r = NULL;
 #endif
 
-	local_table = fib_get_table(net, RT_TABLE_LOCAL);
+	local_table = fib_get_table(net, RT_TABLE_LOCAL);//查找本地路由函数表
 	if (local_table) {
 		ret = RTN_UNICAST;
 		if (!local_table->tb_lookup(local_table, &fl, &res)) {
@@ -469,6 +473,7 @@ int ip_rt_ioctl(struct net *net, unsigned int cmd, void __user *arg)
 			return -EFAULT;
 
 		rtnl_lock();
+		//将用户输入参数转换城fib_config
 		err = rtentry_to_fib_config(net, cmd, &rt, &cfg);
 		if (err == 0) {
 			struct fib_table *tb;
@@ -725,7 +730,7 @@ void fib_add_ifaddr(struct in_ifaddr *ifa)
 			return;
 		}
 	}
-
+	//向local路由表中增加路由项
 	fib_magic(RTM_NEWROUTE, RTN_LOCAL, addr, 32, prim);
 
 	if (!(dev->flags&IFF_UP))
@@ -885,7 +890,7 @@ static int nl_fib_lookup_init(struct net *net)
 				   nl_fib_input, NULL, THIS_MODULE);
 	if (sk == NULL)
 		return -EAFNOSUPPORT;
-	net->ipv4.fibnl = sk;
+	net->ipv4.fibnl = sk;//将创建的sock记录再网络空间的ipv4.fibnl中
 	return 0;
 }
 
@@ -963,11 +968,11 @@ static int fib_netdev_event(struct notifier_block *this, unsigned long event, vo
 	}
 	return NOTIFY_DONE;
 }
-
+//地址添加删除通知
 static struct notifier_block fib_inetaddr_notifier = {
 	.notifier_call =fib_inetaddr_event,
 };
-
+//设备上下线通知
 static struct notifier_block fib_netdev_notifier = {
 	.notifier_call =fib_netdev_event,
 };
@@ -976,22 +981,22 @@ static int __net_init ip_fib_net_init(struct net *net)
 {
 	int err;
 	unsigned int i;
-
+	//为路由函数表队列分配空间
 	net->ipv4.fib_table_hash = kzalloc(
 			sizeof(struct hlist_head)*FIB_TABLE_HASHSZ, GFP_KERNEL);
 	if (net->ipv4.fib_table_hash == NULL)
 		return -ENOMEM;
-
+	//初始化每个队列头。FIB_TABLE_HASHSZ定义为266，标识只能定义256个路由表
 	for (i = 0; i < FIB_TABLE_HASHSZ; i++)
 		INIT_HLIST_HEAD(&net->ipv4.fib_table_hash[i]);
-
+	//初始化本地路由函数表和主路由函数表并链入到路由函数表队列数组中
 	err = fib4_rules_init(net);
 	if (err < 0)
 		goto fail;
 	return 0;
 
 fail:
-	kfree(net->ipv4.fib_table_hash);
+	kfree(net->ipv4.fib_table_hash);//出现错误则释放路由队列数组空间
 	return err;
 }
 
@@ -1028,7 +1033,7 @@ static int __net_init fib_net_init(struct net *net)
 	error = nl_fib_lookup_init(net);
 	if (error < 0)
 		goto out_nlfl;
-	error = fib_proc_init(net);
+	error = fib_proc_init(net);//再/proc文件系统创建route目录
 	if (error < 0)
 		goto out_proc;
 out:
@@ -1055,9 +1060,12 @@ static struct pernet_operations fib_net_ops = {
 
 void __init ip_fib_init(void)
 {
-	rtnl_register(PF_INET, RTM_NEWROUTE, inet_rtm_newroute, NULL);
-	rtnl_register(PF_INET, RTM_DELROUTE, inet_rtm_delroute, NULL);
-	rtnl_register(PF_INET, RTM_GETROUTE, NULL, inet_dump_fib);
+	//使用netlink通信机制中的NETLINK_ROUTE，也就是用户使用ip route命令会触发netlink NETLINK_ROUTE消息
+	//rtnl_register会将函数注册到一个全局rtnl_msg_handlers[protocol][msgtype]中,在NETLINK_ROUTE消息处理函数rtnetlink_rcv()中会根据rtnl_msg_handlers[protocol][msgtype]
+	//来调用对应的函数
+	rtnl_register(PF_INET, RTM_NEWROUTE, inet_rtm_newroute, NULL);//注册ip route add处理函数
+	rtnl_register(PF_INET, RTM_DELROUTE, inet_rtm_delroute, NULL);//注册ip route del处理函数
+	rtnl_register(PF_INET, RTM_GETROUTE, NULL, inet_dump_fib);//注册ip route get处理函数
 
 	register_pernet_subsys(&fib_net_ops);
 	register_netdevice_notifier(&fib_netdev_notifier);

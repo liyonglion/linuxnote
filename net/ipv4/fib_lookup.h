@@ -5,13 +5,13 @@
 #include <linux/list.h>
 #include <net/ip_fib.h>
 
-struct fib_alias {
-	struct list_head	fa_list;
-	struct fib_info		*fa_info;
-	u8			fa_tos;
-	u8			fa_type;
-	u8			fa_scope;
-	u8			fa_state;
+struct fib_alias {// 路由别名结构，这个结构基本就是最后一次路由筛选了
+	struct list_head	fa_list;// 这个是用于链接到fib_node节点中的，看上面的结构体的第二个字段的类型你就懂了~~~~~~
+	struct fib_info		*fa_info;// 这是很重要的字段：顾名思义，就是具体怎么处置这个数据包的操作等
+	u8			fa_tos;// 服务类型TOS
+	u8			fa_type;// 路由类型
+	u8			fa_scope;// 路由范围
+	u8			fa_state;// 路由状态
 #ifdef CONFIG_IP_FIB_TRIE
 	struct rcu_head		rcu;
 #endif

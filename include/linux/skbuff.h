@@ -327,7 +327,7 @@ struct sk_buff {
 	__u32			secmark;
 #endif
 
-	__u32			mark;
+	__u32			mark;//通过iptable --set-mark 设置的值
 
 	sk_buff_data_t		transport_header; //指向数据块中传输层头部
 	sk_buff_data_t		network_header; //指向数据块中网络层头部

@@ -179,8 +179,8 @@ struct proto_ops {
 };
 
 struct net_proto_family {
-	int		family;
-	int		(*create)(struct net *net, struct socket *sock, int protocol);
+	int		family;//协议族类型
+	int		(*create)(struct net *net, struct socket *sock, int protocol);//创建协议族下的对应type socket 
 	struct module	*owner;
 };
 

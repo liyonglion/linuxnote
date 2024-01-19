@@ -14,10 +14,10 @@ static inline int rtnh_ok(const struct rtnexthop *rtnh, int remaining)
 static inline struct rtnexthop *rtnh_next(const struct rtnexthop *rtnh,
                                          int *remaining)
 {
-	int totlen = NLA_ALIGN(rtnh->rtnh_len);
+	int totlen = NLA_ALIGN(rtnh->rtnh_len);//取得rtnext结构的长度
 
-	*remaining -= totlen;
-	return (struct rtnexthop *) ((char *) rtnh + totlen);
+	*remaining -= totlen;//减少长度
+	return (struct rtnexthop *) ((char *) rtnh + totlen);//指向下一个rtnexthop结构
 }
 
 static inline struct nlattr *rtnh_attrs(const struct rtnexthop *rtnh)

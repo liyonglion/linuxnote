@@ -48,34 +48,39 @@
 static struct kmem_cache *fn_hash_kmem __read_mostly;
 static struct kmem_cache *fn_alias_kmem __read_mostly;
 
-struct fib_node {
-	struct hlist_node	fn_hash;
-	struct list_head	fn_alias;
-	__be32			fn_key;
-	struct fib_alias        fn_embedded_alias;
+struct fib_node {//路由节点结构体( 子网相等的路由被分在一起 )
+	struct hlist_node	fn_hash;// 链接到hash表节点( 注意到我们上面所说的fn_zone中的fz_hash了吗？fz_hash哈希之后得到的结果就是fib_node的这个字段，所以这个字段同样仅仅是作为链接作用而已 )
+	struct list_head	fn_alias;// 别名？其实更好的理解是这样的：虽然现在所有的路由都是同一个子网了，但是路由之间还会有其他的信息不同例如tos，路由类型，等等。所以依然存在不同的路由，所以这些都是通过fn_alias来区分。
+	__be32			fn_key;// 计算出来的hash key:目的地址&子网掩码
+	struct fib_alias        fn_embedded_alias;// 分配路由节点的时候同时也分配一个路由别名，所以称为嵌入式的~
 };
+//路由区定义：fn_zone，举个例子，子网掩码长度相同的认为是相同的路由区
+struct fn_zone {// 路由区结构体(所有的子网长度相等的被分在同一个路由区)
+	struct fn_zone		*fz_next;	/*  指向下一个不为空的路由区结构，那么所有的路由区就能链接起来	*/
 
-struct fn_zone {
-	struct fn_zone		*fz_next;	/* Next not empty zone	*/
+	/*用一个hash数组，用来hash得到一个hlist_head，是很多的fib_node通过自己的字段连接在这个队列中，
+	那么通过这个fz_hahs字段可以找到fib_node所在的队列的头hlist_head，进而找到对应的fib_node ( 注意：上面说的hash数组的长度是fz_divisor长度)*/
 	struct hlist_head	*fz_hash;	/* Hash table pointer	*/
-	int			fz_nent;	/* Number of entries	*/
+	int			fz_nent;	/*  包含的路由节总数	*/
 
-	int			fz_divisor;	/* Hash divisor		*/
-	u32			fz_hashmask;	/* (fz_divisor - 1)	*/
+	int			fz_divisor;	/* hash头数量(上面说了)		*/
+	u32			fz_hashmask;	/* (fz_divisor - 1)确定hash头的掩码	*/
 #define FZ_HASHMASK(fz)		((fz)->fz_hashmask)
 
-	int			fz_order;	/* Zone order		*/
-	__be32			fz_mask;
-#define FZ_MASK(fz)		((fz)->fz_mask)
+	int			fz_order;	/* Zone order	子网掩码位数	*/
+	__be32			fz_mask; //子网掩码
+#define FZ_MASK(fz)		((fz)->fz_mask) //获取子网掩码的宏定义
 };
 
 /* NOTE. On fast computers evaluation of fz_hashmask and fz_mask
  * can be cheaper than memory lookup, so that FZ_* macros are used.
  */
 
-struct fn_hash {
+struct fn_hash {// 路由区结构体的数组( 包含所有的额路由区的情况 )
+	// 路由区分成33份，why？仔细想想，子网掩码长度是1~32，0长度掩码代表网关，那么加起来就是33，
+	//即：fn_zone[0]的掩码是0.0.0.0，fn_zone[1]是10000000.00000000.00000000.0000000这一类  等等
 	struct fn_zone	*fn_zones[33];
-	struct fn_zone	*fn_zone_list;
+	struct fn_zone	*fn_zone_list;// 指向第一个活动的路由区；将fn_zones按照降序（路由最长掩码匹配）串起来，注意有点fn_zones元素有可能为空
 };
 
 static inline u32 fn_hash(__be32 key, struct fn_zone *fz)
@@ -210,19 +215,19 @@ fn_new_zone(struct fn_hash *table, int z)
 	struct fn_zone *fz = kzalloc(sizeof(struct fn_zone), GFP_KERNEL);
 	if (!fz)
 		return NULL;
-
+	//z 表示的是掩码，如果z是0，则是该路由表默认路由项。
 	if (z) {
-		fz->fz_divisor = 16;
+		fz->fz_divisor = 16;//hash表的大小是16
 	} else {
 		fz->fz_divisor = 1;
 	}
-	fz->fz_hashmask = (fz->fz_divisor - 1);
-	fz->fz_hash = fz_hash_alloc(fz->fz_divisor);
+	fz->fz_hashmask = (fz->fz_divisor - 1);//hash掩码
+	fz->fz_hash = fz_hash_alloc(fz->fz_divisor);//申请一个hash表数组
 	if (!fz->fz_hash) {
 		kfree(fz);
 		return NULL;
 	}
-	fz->fz_order = z;
+	fz->fz_order = z;//保存子网掩码位数
 	fz->fz_mask = inet_make_mask(z);
 
 	/* Find the first not empty zone with more specific mask */
@@ -230,6 +235,7 @@ fn_new_zone(struct fn_hash *table, int z)
 		if (table->fn_zones[i])
 			break;
 	write_lock_bh(&fib_hash_lock);
+	//放入到fn_zone_list中合适位置。
 	if (i>32) {
 		/* No more specific masks, we are the first. */
 		fz->fz_next = table->fn_zone_list;
@@ -252,17 +258,18 @@ fn_hash_lookup(struct fib_table *tb, const struct flowi *flp, struct fib_result 
 	struct fn_hash *t = (struct fn_hash*)tb->tb_data;
 
 	read_lock(&fib_hash_lock);
+	//fn_zone_list是按子网掩码位数降序排列的,所以这里的匹配是按照子网掩码从高到底遍历，也是路由器按照最长掩码匹配
 	for (fz = t->fn_zone_list; fz; fz = fz->fz_next) {
 		struct hlist_head *head;
 		struct hlist_node *node;
 		struct fib_node *f;
-		__be32 k = fz_key(flp->fl4_dst, fz);
+		__be32 k = fz_key(flp->fl4_dst, fz);//目标IP和掩码进行&操作即为KEY
 
-		head = &fz->fz_hash[fn_hash(k, fz)];
+		head = &fz->fz_hash[fn_hash(k, fz)];//从fib_node中开始查找，fib_node中保存的是目标前缀一致，但是TOS、priority、scope不一致的fib_alias路由项
 		hlist_for_each_entry(f, node, head, fn_hash) {
-			if (f->fn_key != k)
+			if (f->fn_key != k)//hashkey不一样，肯定不相同
 				continue;
-
+			//路由前缀一样，则进入更加深层的去判断fib_alias。
 			err = fib_semantic_match(&f->fn_alias,
 						 flp, res,
 						 f->fn_key, fz->fz_mask,
@@ -285,7 +292,7 @@ fn_hash_select_default(struct fib_table *tb, const struct flowi *flp, struct fib
 	struct fib_node *f;
 	struct fib_info *fi = NULL;
 	struct fib_info *last_resort;
-	struct fn_hash *t = (struct fn_hash*)tb->tb_data;
+	struct fn_hash *t = (struct fn_hash*)tb->tb_data;//获取fn_hash
 	struct fn_zone *fz = t->fn_zones[0];
 
 	if (fz == NULL)
@@ -296,30 +303,31 @@ fn_hash_select_default(struct fib_table *tb, const struct flowi *flp, struct fib
 	order = -1;
 
 	read_lock(&fib_hash_lock);
+	//遍历路由节点队列
 	hlist_for_each_entry(f, node, &fz->fz_hash[0], fn_hash) {
 		struct fib_alias *fa;
-
+		//遍历路由别名队列
 		list_for_each_entry(fa, &f->fn_alias, fa_list) {
 			struct fib_info *next_fi = fa->fa_info;
 
 			if (fa->fa_scope != res->scope ||
-			    fa->fa_type != RTN_UNICAST)
+			    fa->fa_type != RTN_UNICAST)//查找符合要求的范围和单播类型别名
 				continue;
 
-			if (next_fi->fib_priority > res->fi->fib_priority)
+			if (next_fi->fib_priority > res->fi->fib_priority)//检查路由信息优先级
 				break;
 			if (!next_fi->fib_nh[0].nh_gw ||
-			    next_fi->fib_nh[0].nh_scope != RT_SCOPE_LINK)
+			    next_fi->fib_nh[0].nh_scope != RT_SCOPE_LINK)//检查路由信息中跳转结构
 				continue;
-			fa->fa_state |= FA_S_ACCESSED;
+			fa->fa_state |= FA_S_ACCESSED;//设置路由别名访问标志
 
 			if (fi == NULL) {
-				if (next_fi != res->fi)
+				if (next_fi != res->fi)//找到的路由信息与查找的不同
 					break;
 			} else if (!fib_detect_death(fi, order, &last_resort,
-						&last_idx, tb->tb_default)) {
-				fib_result_assign(res, fi);
-				tb->tb_default = order;
+						&last_idx, tb->tb_default)) {//在邻居子系统中检测是否可以到达
+				fib_result_assign(res, fi);//记录查找到的路由信息结构
+				tb->tb_default = order;//记录路由信息结构在队列中的序号
 				goto out;
 			}
 			fi = next_fi;
@@ -327,21 +335,21 @@ fn_hash_select_default(struct fib_table *tb, const struct flowi *flp, struct fib
 		}
 	}
 
-	if (order <= 0 || fi == NULL) {
-		tb->tb_default = -1;
+	if (order <= 0 || fi == NULL) {//如果没有找到路由信息结构
+		tb->tb_default = -1;//将路由信息的队列序号设为负值
 		goto out;
 	}
 
 	if (!fib_detect_death(fi, order, &last_resort, &last_idx,
-				tb->tb_default)) {
-		fib_result_assign(res, fi);
-		tb->tb_default = order;
+				tb->tb_default)) {//在邻居子系统中检测路由是否可以到达
+		fib_result_assign(res, fi);//将路由信息结构记录到查询结果中
+		tb->tb_default = order;//将路由信息结构的队列序号记录到路由函数表中
 		goto out;
 	}
 
 	if (last_idx >= 0)
-		fib_result_assign(res, last_resort);
-	tb->tb_default = last_idx;
+		fib_result_assign(res, last_resort);//将最后认定的路由信息结构记录到结果中
+	tb->tb_default = last_idx;//将最后认定的队列序号记录到路由函数表
 out:
 	read_unlock(&fib_hash_lock);
 }
@@ -355,6 +363,7 @@ static inline void fib_insert_node(struct fn_zone *fz, struct fib_node *f)
 }
 
 /* Return the node in FZ matching KEY. */
+//根据搜索关键字，在fn_zone变量fz中查找符合条件的fib_node变量
 static struct fib_node *fib_find_node(struct fn_zone *fz, __be32 key)
 {
 	struct hlist_head *head = &fz->fz_hash[fn_hash(key, fz)];
@@ -380,21 +389,21 @@ static int fn_hash_insert(struct fib_table *tb, struct fib_config *cfg)
 	u8 tos = cfg->fc_tos;
 	__be32 key;
 	int err;
-
+	//掩码长度大于32，错误
 	if (cfg->fc_dst_len > 32)
 		return -EINVAL;
-
+	//根据掩码，找到对应的zone。
 	fz = table->fn_zones[cfg->fc_dst_len];
-	if (!fz && !(fz = fn_new_zone(table, cfg->fc_dst_len)))
+	if (!fz && !(fz = fn_new_zone(table, cfg->fc_dst_len)))//不存在，则创建fn_zone
 		return -ENOBUFS;
 
 	key = 0;
 	if (cfg->fc_dst) {
 		if (cfg->fc_dst & ~FZ_MASK(fz))
 			return -EINVAL;
-		key = fz_key(cfg->fc_dst, fz);
+		key = fz_key(cfg->fc_dst, fz);//将目标地址和掩码进行&操作，计算得到key
 	}
-
+	//创建fib_info，也就是路由项
 	fi = fib_create_info(cfg);
 	if (IS_ERR(fi))
 		return PTR_ERR(fi);
@@ -404,13 +413,13 @@ static int fn_hash_insert(struct fib_table *tb, struct fib_config *cfg)
 	    (cfg->fc_dst_len == 32 ||
 	     (1 << cfg->fc_dst_len) > fz->fz_divisor))
 		fn_rehash_zone(fz);
-
+	//查找fib_node。fib_node中存放的是具有相同子网的路由项，子网相同(也就是说fib_node中存放的是路由前缀相同的路由项)，可以tos和优先级、type、scope不一样。具有相同的子网，就叫fib_alias
 	f = fib_find_node(fz, key);
 
 	if (!f)
 		fa = NULL;
 	else
-		fa = fib_find_alias(&f->fn_alias, tos, fi->fib_priority);
+		fa = fib_find_alias(&f->fn_alias, tos, fi->fib_priority);//找到首个比tos小，且优先级大于或等于prio的路由表别名
 
 	/* Now fa, if non-NULL, points to the first fib alias
 	 * with the same keys [prefix,tos,priority], if such key already
@@ -422,13 +431,13 @@ static int fn_hash_insert(struct fib_table *tb, struct fib_config *cfg)
 	 * If f is NULL, no fib node matched the destination key
 	 * and we need to allocate a new one of those as well.
 	 */
-
+	
 	if (fa && fa->fa_tos == tos &&
-	    fa->fa_info->fib_priority == fi->fib_priority) {
+	    fa->fa_info->fib_priority == fi->fib_priority) {//存在相同tos、priority的路由项
 		struct fib_alias *fa_first, *fa_match;
 
 		err = -EEXIST;
-		if (cfg->fc_nlflags & NLM_F_EXCL)
+		if (cfg->fc_nlflags & NLM_F_EXCL)//不允许修改，直接返回
 			goto out;
 
 		/* We have 2 goals:
@@ -436,7 +445,7 @@ static int fn_hash_insert(struct fib_table *tb, struct fib_config *cfg)
 		 * duplicate routes
 		 * 2. Find next 'fa' (or head), NLM_F_APPEND inserts before it
 		 */
-		fa_match = NULL;
+		fa_match = NULL;//完全匹配的fib_alias
 		fa_first = fa;
 		fa = list_entry(fa->fa_list.prev, struct fib_alias, fa_list);
 		list_for_each_entry_continue(fa, &f->fn_alias, fa_list) {
@@ -446,22 +455,23 @@ static int fn_hash_insert(struct fib_table *tb, struct fib_config *cfg)
 				break;
 			if (fa->fa_type == cfg->fc_type &&
 			    fa->fa_scope == cfg->fc_scope &&
-			    fa->fa_info == fi) {
+			    fa->fa_info == fi) {// 路由项的tos、priority、type 和 scope	和fib_info一致，就跳出
 				fa_match = fa;
 				break;
 			}
 		}
-
+		//替换之前的fib_info
 		if (cfg->fc_nlflags & NLM_F_REPLACE) {
 			struct fib_info *fi_drop;
 			u8 state;
 
 			fa = fa_first;
 			if (fa_match) {
-				if (fa == fa_match)
+				if (fa == fa_match)//找到一模一样的路由项，直接返回
 					err = 0;
 				goto out;
 			}
+			//走到该位置，说明没有找到一模一样的fa，说明此时是TOS和priority不一致或者type、scope不一致，需要替换
 			write_lock_bh(&fib_hash_lock);
 			fi_drop = fa->fa_info;
 			fa->fa_info = fi;
@@ -497,7 +507,7 @@ static int fn_hash_insert(struct fib_table *tb, struct fib_config *cfg)
 
 	err = -ENOBUFS;
 
-	if (!f) {
+	if (!f) {//创建fib_node
 		new_f = kmem_cache_zalloc(fn_hash_kmem, GFP_KERNEL);
 		if (new_f == NULL)
 			goto out;
@@ -526,9 +536,9 @@ static int fn_hash_insert(struct fib_table *tb, struct fib_config *cfg)
 
 	write_lock_bh(&fib_hash_lock);
 	if (new_f)
-		fib_insert_node(fz, new_f);
+		fib_insert_node(fz, new_f);//fib_node插入到fib_zone中
 	list_add_tail(&new_fa->fa_list,
-		 (fa ? &fa->fa_list : &f->fn_alias));
+		 (fa ? &fa->fa_list : &f->fn_alias));//将路由表别名插入到fib_node的alias链表中
 	fib_hash_genid++;
 	write_unlock_bh(&fib_hash_lock);
 
@@ -558,17 +568,17 @@ static int fn_hash_delete(struct fib_table *tb, struct fib_config *cfg)
 
 	if (cfg->fc_dst_len > 32)
 		return -EINVAL;
-
+	//根据掩码大小，找到对应的fib_zone。
 	if ((fz  = table->fn_zones[cfg->fc_dst_len]) == NULL)
-		return -ESRCH;
+		return -ESRCH;//为空，返回NO such process错误
 
 	key = 0;
 	if (cfg->fc_dst) {
-		if (cfg->fc_dst & ~FZ_MASK(fz))
+		if (cfg->fc_dst & ~FZ_MASK(fz))//dst地址中的host必须为0，否则返回 invalid argument错误
 			return -EINVAL;
-		key = fz_key(cfg->fc_dst, fz);
+		key = fz_key(cfg->fc_dst, fz);//dst & 掩码
 	}
-
+	//找到fib_node。fib_node中保存的是目标前缀一样的路由项，可以tos和优先级、type、scope不一样的fib_alias
 	f = fib_find_node(fz, key);
 
 	if (!f)
@@ -592,12 +602,12 @@ static int fn_hash_delete(struct fib_table *tb, struct fib_config *cfg)
 		     fa->fa_scope == cfg->fc_scope) &&
 		    (!cfg->fc_protocol ||
 		     fi->fib_protocol == cfg->fc_protocol) &&
-		    fib_nh_match(cfg, fi) == 0) {
+		    fib_nh_match(cfg, fi) == 0) {//找到具体的路由项
 			fa_to_delete = fa;
 			break;
 		}
 	}
-
+	//fa_to_delete不为空，表明找到了。
 	if (fa_to_delete) {
 		int kill_fn;
 
@@ -607,8 +617,8 @@ static int fn_hash_delete(struct fib_table *tb, struct fib_config *cfg)
 
 		kill_fn = 0;
 		write_lock_bh(&fib_hash_lock);
-		list_del(&fa->fa_list);
-		if (list_empty(&f->fn_alias)) {
+		list_del(&fa->fa_list);//从fib_alias中删除
+		if (list_empty(&f->fn_alias)) {//fib_node中的fn_alias为空，说明需要删除该fib_node
 			hlist_del(&f->fn_hash);
 			kill_fn = 1;
 		}
@@ -618,7 +628,7 @@ static int fn_hash_delete(struct fib_table *tb, struct fib_config *cfg)
 		if (fa->fa_state & FA_S_ACCESSED)
 			rt_cache_flush(-1);
 		fn_free_alias(fa, f);
-		if (kill_fn) {
+		if (kill_fn) {//fib_node为空，则删除
 			fn_free_node(f);
 			fz->fz_nent--;
 		}
@@ -782,19 +792,19 @@ void __init fib_hash_init(void)
 struct fib_table *fib_hash_table(u32 id)
 {
 	struct fib_table *tb;
-
+	//分配fib_table和fn_hash一起分配
 	tb = kmalloc(sizeof(struct fib_table) + sizeof(struct fn_hash),
 		     GFP_KERNEL);
 	if (tb == NULL)
 		return NULL;
-
+	//初始化fib_table
 	tb->tb_id = id;
 	tb->tb_default = -1;
-	tb->tb_lookup = fn_hash_lookup;
-	tb->tb_insert = fn_hash_insert;
-	tb->tb_delete = fn_hash_delete;
-	tb->tb_flush = fn_hash_flush;
-	tb->tb_select_default = fn_hash_select_default;
+	tb->tb_lookup = fn_hash_lookup;//查询路由项
+	tb->tb_insert = fn_hash_insert;//插入路由项
+	tb->tb_delete = fn_hash_delete;//删除路由项
+	tb->tb_flush = fn_hash_flush;//清空路由项
+	tb->tb_select_default = fn_hash_select_default;//默认路由项
 	tb->tb_dump = fn_hash_dump;
 	memset(tb->tb_data, 0, sizeof(struct fn_hash));
 	return tb;

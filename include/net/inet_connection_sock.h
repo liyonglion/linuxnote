@@ -84,24 +84,24 @@ struct inet_connection_sock_af_ops {
  */
 struct inet_connection_sock {
 	/* inet_sock has to be the first member! */
-	struct inet_sock	  icsk_inet;
-	struct request_sock_queue icsk_accept_queue;
-	struct inet_bind_bucket	  *icsk_bind_hash; //sk所有的bhash桶
-	unsigned long		  icsk_timeout;
- 	struct timer_list	  icsk_retransmit_timer;
- 	struct timer_list	  icsk_delack_timer;
-	__u32			  icsk_rto;
-	__u32			  icsk_pmtu_cookie;
-	const struct tcp_congestion_ops *icsk_ca_ops;
-	const struct inet_connection_sock_af_ops *icsk_af_ops;
+	struct inet_sock	  icsk_inet; //INET 协议族的sock 结构
+	struct request_sock_queue icsk_accept_queue;//确定接收的队列
+	struct inet_bind_bucket	  *icsk_bind_hash; //sk所在的bhash桶
+	unsigned long		  icsk_timeout; //超时
+ 	struct timer_list	  icsk_retransmit_timer;//没有 ACK 时的重发定时器
+ 	struct timer_list	  icsk_delack_timer;//确定删除的定时器
+	__u32			  icsk_rto;//重复超时
+	__u32			  icsk_pmtu_cookie;//最新的pMTU
+	const struct tcp_congestion_ops *icsk_ca_ops;//拥挤情况时的处理函数表
+	const struct inet_connection_sock_af_ops *icsk_af_ops;//AF_INET 指定的函数表
 	unsigned int		  (*icsk_sync_mss)(struct sock *sk, u32 pmtu);
-	__u8			  icsk_ca_state;
-	__u8			  icsk_retransmits;
-	__u8			  icsk_pending;
-	__u8			  icsk_backoff;
-	__u8			  icsk_syn_retries;
-	__u8			  icsk_probes_out;
-	__u16			  icsk_ext_hdr_len;
+	__u8			  icsk_ca_state;//拥挤情况的处理状态
+	__u8			  icsk_retransmits; //重复数量
+	__u8			  icsk_pending; //挂起
+	__u8			  icsk_backoff; //允许连接的数量
+	__u8			  icsk_syn_retries; //重发syn的数量
+	__u8			  icsk_probes_out;//探测到未应答的窗口
+	__u16			  icsk_ext_hdr_len;//网络协议头部的长度
 	struct {
 		__u8		  pending;	 /* ACK is pending			   */
 		__u8		  quick;	 /* Scheduled number of quick acks	   */

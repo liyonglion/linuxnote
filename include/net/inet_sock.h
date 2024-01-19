@@ -111,19 +111,19 @@ struct inet_sock {
 	struct ipv6_pinfo	*pinet6;
 #endif
 	/* Socket demultiplex comparisons on incoming packets. */
-	__be32			daddr;
-	__be32			rcv_saddr;
-	__be16			dport;
-	__u16			num;
-	__be32			saddr;
-	__s16			uc_ttl;
+	__be32			daddr; //目标地址
+	__be32			rcv_saddr;//用户配置的监听地址，在inet_bind()中赋值
+	__be16			dport;//目标端口
+	__u16			num; 
+	__be32			saddr;//源地址。在bind过程中，rcv_saddr = saddr
+	__s16			uc_ttl; //TTL
 	__u16			cmsg_flags;
 	struct ip_options	*opt;
-	__be16			sport;
+	__be16			sport;//绑定端口号
 	__u16			id;
 	__u8			tos;
 	__u8			mc_ttl;
-	__u8			pmtudisc;
+	__u8			pmtudisc;//是否按照MTU分包
 	__u8			recverr:1,
 				is_icsk:1, //标识是否是inet_connection_sock类型
 				freebind:1,

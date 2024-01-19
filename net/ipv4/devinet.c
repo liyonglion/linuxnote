@@ -870,15 +870,15 @@ __be32 inet_select_addr(const struct net_device *dev, __be32 dst, int scope)
 	struct net *net = dev_net(dev);
 
 	rcu_read_lock();
-	in_dev = __in_dev_get_rcu(dev);
+	in_dev = __in_dev_get_rcu(dev);//取得 IPv4 配置设备结构
 	if (!in_dev)
 		goto no_in_dev;
 
-	for_primary_ifa(in_dev) {
+	for_primary_ifa(in_dev) {//地址队列中查找相同范围和目标地址的结构
 		if (ifa->ifa_scope > scope)
 			continue;
 		if (!dst || inet_ifa_match(dst, ifa)) {
-			addr = ifa->ifa_local;
+			addr = ifa->ifa_local;//记录本机地址
 			break;
 		}
 		if (!addr)
@@ -887,7 +887,7 @@ __be32 inet_select_addr(const struct net_device *dev, __be32 dst, int scope)
 no_in_dev:
 	rcu_read_unlock();
 
-	if (addr)
+	if (addr)//找到就退出
 		goto out;
 
 	/* Not loopback addresses on loopback should be preferred
@@ -896,14 +896,14 @@ no_in_dev:
 	 */
 	read_lock(&dev_base_lock);
 	rcu_read_lock();
-	for_each_netdev(net, dev) {
+	for_each_netdev(net, dev) {//扩大搜索范围,再次搜索地址结构
 		if ((in_dev = __in_dev_get_rcu(dev)) == NULL)
 			continue;
 
 		for_primary_ifa(in_dev) {
 			if (ifa->ifa_scope != RT_SCOPE_LINK &&
 			    ifa->ifa_scope <= scope) {
-				addr = ifa->ifa_local;
+				addr = ifa->ifa_local;//找到记录本地地址并返回
 				goto out_unlock_both;
 			}
 		} endfor_ifa(in_dev);
@@ -1637,11 +1637,14 @@ static __net_initdata struct pernet_operations devinet_ops = {
 
 void __init devinet_init(void)
 {
+	/*
+	向内核登记一个 pernet_operations 结构，这个结构提供了网络空间的操作表,即网络空间的函数表。这次登记的是 devinet_ops 结构变量,它提供了初始化网络空间和释放网络空间的钩子函数
+	*/
 	register_pernet_subsys(&devinet_ops);
 
-	register_gifconf(PF_INET, inet_gifconf);
-	register_netdevice_notifier(&ip_netdev_notifier);
-
+	register_gifconf(PF_INET, inet_gifconf);//注册IO配置程序
+	register_netdevice_notifier(&ip_netdev_notifier);//注册通知节点
+	//注册处理路由地址的netlink
 	rtnl_register(PF_INET, RTM_NEWADDR, inet_rtm_newaddr, NULL);
 	rtnl_register(PF_INET, RTM_DELADDR, inet_rtm_deladdr, NULL);
 	rtnl_register(PF_INET, RTM_GETADDR, NULL, inet_dump_ifaddr);

@@ -73,20 +73,20 @@ struct inet_ehash_bucket {
  * users logged onto your box, isn't it nice to know that new data
  * ports are created in O(1) time?  I thought so. ;-)	-DaveM
  */
-struct inet_bind_bucket {
-	struct net		*ib_net;
-	unsigned short		port;
-	signed short		fastreuse;
-	struct hlist_node	node;
-	struct hlist_head	owners;
+struct inet_bind_bucket {//绑定桶结构
+	struct net		*ib_net;//网络命名空间
+	unsigned short		port;//端口号
+	signed short		fastreuse;//是否可复用
+	struct hlist_node	node; //链入hash桶chain中的哈希节点
+	struct hlist_head	owners;//sock结构队列。监听相同的端口号的sk
 };
 
 #define inet_bind_bucket_for_each(tb, node, head) \
 	hlist_for_each_entry(tb, node, head, node)
 
 struct inet_bind_hashbucket {
-	spinlock_t		lock;
-	struct hlist_head	chain;
+	spinlock_t		lock; //自旋锁
+	struct hlist_head	chain; //桶队列
 };
 
 /* This is for listening sockets, thus all sockets which possess wildcards. */
@@ -100,24 +100,24 @@ struct inet_hashinfo {
 	 *
 	 * TIME_WAIT sockets use a separate chain (twchain).
 	 */
-	struct inet_ehash_bucket	*ehash;
-	rwlock_t			*ehash_locks;
-	unsigned int			ehash_size;
+	struct inet_ehash_bucket	*ehash;//已经建立连接的hash桶。key为四元组，value为struct sock指针对象
+	rwlock_t			*ehash_locks;//队列锁
+	unsigned int			ehash_size;//队列长度
 	unsigned int			ehash_locks_mask;
 
 	/* Ok, let's try this, I give up, we do need a local binding
 	 * TCP hash as well as the others for fast bind/connect.
 	 */
-	struct inet_bind_hashbucket	*bhash;
+	struct inet_bind_hashbucket	*bhash;//管理端口号的哈希桶
 
-	unsigned int			bhash_size;
+	unsigned int			bhash_size;//hash桶的长度
 	/* Note : 4 bytes padding on 64 bit arches */
 
 	/* All sockets in TCP_LISTEN state will be in here.  This is the only
 	 * table where wildcard'd TCP sockets can exist.  Hash function here
 	 * is just local port number.
 	 */
-	struct hlist_head		listening_hash[INET_LHTABLE_SIZE];
+	struct hlist_head		listening_hash[INET_LHTABLE_SIZE];//监听哈希队列
 
 	/* All the above members are written once at bootup and
 	 * never written again _or_ are predominantly read-access.
@@ -127,8 +127,8 @@ struct inet_hashinfo {
 	 */
 	rwlock_t			lhash_lock ____cacheline_aligned;
 	atomic_t			lhash_users;
-	wait_queue_head_t		lhash_wait;
-	struct kmem_cache			*bind_bucket_cachep;
+	wait_queue_head_t		lhash_wait;//等待队列头
+	struct kmem_cache			*bind_bucket_cachep;//告诉缓存
 };
 
 static inline struct inet_ehash_bucket *inet_ehash_bucket(

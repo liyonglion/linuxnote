@@ -576,7 +576,7 @@ struct net_device *__dev_get_by_name(struct net *net, const char *name)
 	hlist_for_each(p, dev_name_hash(net, name)) {
 		struct net_device *dev
 			= hlist_entry(p, struct net_device, name_hlist);
-		if (!strncmp(dev->name, name, IFNAMSIZ))
+		if (!strncmp(dev->name, name, IFNAMSIZ))//比较名称是否相等
 			return dev;
 	}
 	return NULL;
@@ -625,7 +625,7 @@ struct net_device *__dev_get_by_index(struct net *net, int ifindex)
 	hlist_for_each(p, dev_index_hash(net, ifindex)) {
 		struct net_device *dev
 			= hlist_entry(p, struct net_device, index_hlist);
-		if (dev->ifindex == ifindex)
+		if (dev->ifindex == ifindex)//比较设备索引是否一致
 			return dev;
 	}
 	return NULL;

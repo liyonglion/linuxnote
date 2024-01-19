@@ -520,7 +520,7 @@ int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 		inet->saddr = 0;  /* Use device */
 
 	/* Make sure we are allowed to bind here. */
-	//检查是否运行绑定
+	//检查是否运行绑定。tcp的为 inet_csk_get_port()
 	if (sk->sk_prot->get_port(sk, snum)) {
 		inet->saddr = inet->rcv_saddr = 0;//失败清空地址
 		err = -EADDRINUSE;
@@ -828,12 +828,12 @@ int inet_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 			break;
 		case SIOCADDRT:
 		case SIOCDELRT:
-		case SIOCRTMSG:
+		case SIOCRTMSG://路由相关操作
 			err = ip_rt_ioctl(net, cmd, (void __user *)arg);
 			break;
 		case SIOCDARP:
 		case SIOCGARP:
-		case SIOCSARP:
+		case SIOCSARP: //arp相关操作
 			err = arp_ioctl(net, cmd, (void __user *)arg);
 			break;
 		case SIOCGIFADDR:
@@ -1472,7 +1472,7 @@ static int __init inet_init(void)
 	/*
 	 *	Set the IP module up
 	 */
-
+	//里面有初始化路由选项相关
 	ip_init();
 
 	tcp_v4_init();

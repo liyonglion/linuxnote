@@ -1361,7 +1361,7 @@ static int rtnetlink_net_init(struct net *net)
 				   rtnetlink_rcv, &rtnl_mutex, THIS_MODULE);
 	if (!sk)
 		return -ENOMEM;
-	net->rtnl = sk;
+	net->rtnl = sk;//创建socket
 	return 0;
 }
 

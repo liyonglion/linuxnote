@@ -37,17 +37,26 @@ struct sk_buff;
 
 struct dst_entry
 {
-	struct rcu_head		rcu_head;
-	struct dst_entry	*child;
-	struct net_device       *dev;
+	struct rcu_head		rcu_head;/*将路由缓存项链接在一起*/
+	struct dst_entry	*child;/*子dst_entry*/
+	struct net_device       *dev;/*出口设备*/
 	short			error;
+	/*
+
+该值表示该dst_entry的状态。
+
+1.若为0，表示可以正常使用
+
+2.若为2，则说明该dst_entry即将被
+
+*/
 	short			obsolete;
 	int			flags;
 #define DST_HOST		1
 #define DST_NOXFRM		2
 #define DST_NOPOLICY		4
 #define DST_NOHASH		8
-	unsigned long		expires;
+	unsigned long		expires;/*表示该表项过期的时间戳*/
 
 	unsigned short		header_len;	/* more space at head required */
 	unsigned short		trailer_len;	/* space to reserve at tail */
@@ -57,16 +66,20 @@ struct dst_entry
 
 	struct dst_entry	*path;
 
-	struct neighbour	*neighbour;
-	struct hh_cache		*hh;
-	struct xfrm_state	*xfrm;
-
+	struct neighbour	*neighbour;/*关联的邻居项*/
+	struct hh_cache		*hh;/*指向二层头部缓存相关的数据结构变量*/
+	struct xfrm_state	*xfrm;/*xfrm相关的指针*/
+	/*输入、输出相关的函数指针，当在函数ip_rcv_finish中，完成路由的查找后，即会
+	根据input、output函数，传递数据包，对于本地接收的数据包，则其input函数为
+	ip_local_deliver，本地接收的数据包，只会使用到函数input；对于要转发的数据包，
+	其input指向函数ip_forward,output则指向函数ip_output，对于转发的数据包则同时需要使用
+	input与output函数；对于本地发送出去的数据包，则只会使用到output函数。*/
 	int			(*input)(struct sk_buff*);
 	int			(*output)(struct sk_buff*);
 
-	struct  dst_ops	        *ops;
+	struct  dst_ops	        *ops;/*dst_ops指针，包括路由缓存的slab缓存块，缓存的垃圾回收函数等*/
 
-	u32			metrics[RTAX_MAX];
+	u32			metrics[RTAX_MAX];/*规格向量，主要是被tcp使用*/
 
 #ifdef CONFIG_NET_CLS_ROUTE
 	__u32			tclassid;
@@ -78,7 +91,8 @@ struct dst_entry
 	 */
 	atomic_t		__refcnt;	/* client references	*/
 	int			__use;
-	unsigned long		lastuse;
+	unsigned long		lastuse;/*最近一次使用该路由缓存的时间戳*/
+	//通过next将路由项链成链表；rtable通过rt_next链成路由表队列
 	union {
 		struct dst_entry *next;
 		struct rtable    *rt_next;

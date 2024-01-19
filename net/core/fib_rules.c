@@ -33,7 +33,7 @@ int fib_default_rule_add(struct fib_rules_ops *ops,
 
 	/* The lock is not required here, the list in unreacheable
 	 * at the moment this function is called */
-	list_add_tail(&r->list, &ops->rules_list);
+	list_add_tail(&r->list, &ops->rules_list);//加入到当前的命名空间net->ipv4.rules_ops.rulus_list
 	return 0;
 }
 EXPORT_SYMBOL(fib_default_rule_add);
@@ -41,7 +41,7 @@ EXPORT_SYMBOL(fib_default_rule_add);
 static void notify_rule_change(int event, struct fib_rule *rule,
 			       struct fib_rules_ops *ops, struct nlmsghdr *nlh,
 			       u32 pid);
-
+//根据协议簇在链表rules_ops中查找符合要求的struct fib_rules_ops类型的变量对于ipv4而言，即为fib4_rules_ops
 static struct fib_rules_ops *lookup_rules_ops(struct net *net, int family)
 {
 	struct fib_rules_ops *ops;
@@ -129,20 +129,21 @@ void fib_rules_unregister(struct fib_rules_ops *ops)
 }
 
 EXPORT_SYMBOL_GPL(fib_rules_unregister);
-
+//遍历传入的ops变量的rules_list链表，对于每一个fib_rule调用fib_rule_match进行fib_rule规则匹配
 static int fib_rule_match(struct fib_rule *rule, struct fib_rules_ops *ops,
 			  struct flowi *fl, int flags)
 {
 	int ret = 0;
 
-	if (rule->ifindex && (rule->ifindex != fl->iif))
+	if (rule->ifindex && (rule->ifindex != fl->iif))//规则中存在接口，而匹配的入接口和该接口不一致，则直接返回
 		goto out;
 
-	if ((rule->mark ^ fl->mark) & rule->mark_mask)
+	if ((rule->mark ^ fl->mark) & rule->mark_mask)//判断mark值是否一样，不一样直接返回
 		goto out;
-
+	//这里的match函数指针为 fib4_rule_match()
 	ret = ops->match(rule, fl, flags);
 out:
+	//用户配置ip rule not ,表示要取反操作
 	return (rule->flags & FIB_RULE_INVERT) ? !ret : ret;
 }
 
@@ -153,13 +154,14 @@ int fib_rules_lookup(struct fib_rules_ops *ops, struct flowi *fl,
 	int err;
 
 	rcu_read_lock();
-
+	//遍历所有的ip rule规则
 	list_for_each_entry_rcu(rule, &ops->rules_list, list) {
 jumped:
-		if (!fib_rule_match(rule, ops, fl, flags))
+		if (!fib_rule_match(rule, ops, fl, flags))//是否匹配规则
 			continue;
-
-		if (rule->action == FR_ACT_GOTO) {
+		//走到这个位置，说明匹配上
+		
+		if (rule->action == FR_ACT_GOTO) {//配置了ip rule xxx goto yyyy
 			struct fib_rule *target;
 
 			target = rcu_dereference(rule->ctarget);
@@ -169,10 +171,10 @@ jumped:
 				rule = target;
 				goto jumped;
 			}
-		} else if (rule->action == FR_ACT_NOP)
+		} else if (rule->action == FR_ACT_NOP)//不做任何操作
 			continue;
 		else
-			err = ops->action(rule, fl, flags, arg);
+			err = ops->action(rule, fl, flags, arg);//fib4_rule_action() 
 
 		if (err != -EAGAIN) {
 			fib_rule_get(rule);
@@ -194,13 +196,17 @@ static int validate_rulemsg(struct fib_rule_hdr *frh, struct nlattr **tb,
 			    struct fib_rules_ops *ops)
 {
 	int err = -EINVAL;
-
+	/*
+	1.若源地址的长度不为0时，若tb[FRA_SRC]中为空，或者传入的地址长度与相应协议规定的地址长度不等，或者实际传递的地址的实际长度与相应协议规定的地址长度不等时，则返回-EINVAL。
+	*/
 	if (frh->src_len)
 		if (tb[FRA_SRC] == NULL ||
 		    frh->src_len > (ops->addr_size * 8) ||
 		    nla_len(tb[FRA_SRC]) != ops->addr_size)
 			goto errout;
-
+	/*
+	若目的地址的长度不为0时，若tb[FRA_SRC]中为空，或者传入的地址长度与相应协议规定的地址长度不等，或者实际传递的地址的实际长度与相应协议规定的地址长度不等时，则返回-EINVAL。
+	*/
 	if (frh->dst_len)
 		if (tb[FRA_DST] == NULL ||
 		    frh->dst_len > (ops->addr_size * 8) ||
@@ -211,7 +217,7 @@ static int validate_rulemsg(struct fib_rule_hdr *frh, struct nlattr **tb,
 errout:
 	return err;
 }
-
+//添加ip rule规格。也就是ip rule 的处理命令
 static int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 {
 	struct net *net = sock_net(skb->sk);
@@ -223,41 +229,44 @@ static int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 
 	if (nlh->nlmsg_len < nlmsg_msg_size(sizeof(*frh)))
 		goto errout;
-
+	/*
+		根据应用层传递的协议类型，查找到相应注册的struct fib_rules_ops类型的变量对于ipv4而言，就是fib4_rules_ops
+	*/
 	ops = lookup_rules_ops(net, frh->family);
 	if (ops == NULL) {
 		err = -EAFNOSUPPORT;
 		goto errout;
 	}
-
+	//对应用层传递的值进行解析
 	err = nlmsg_parse(nlh, sizeof(*frh), tb, FRA_MAX, ops->policy);
 	if (err < 0)
 		goto errout;
-
+	//并对传入的源或者目的地址值进行合理性检查
 	err = validate_rulemsg(frh, tb, ops);
 	if (err < 0)
 		goto errout;
-
+	//创建一个新的fib_rule缓存
 	rule = kzalloc(ops->rule_size, GFP_KERNEL);
 	if (rule == NULL) {
 		err = -ENOMEM;
 		goto errout;
 	}
+	//设置规则所属的命名空间
 	rule->fr_net = hold_net(net);
-
+	//设置优先级
 	if (tb[FRA_PRIORITY])
 		rule->pref = nla_get_u32(tb[FRA_PRIORITY]);
-
+	//设置接口index和接口名称
 	if (tb[FRA_IFNAME]) {
 		struct net_device *dev;
 
 		rule->ifindex = -1;
 		nla_strlcpy(rule->ifname, tb[FRA_IFNAME], IFNAMSIZ);
-		dev = __dev_get_by_name(net, rule->ifname);
+		dev = __dev_get_by_name(net, rule->ifname);//通过设备名找到对应的设备
 		if (dev)
 			rule->ifindex = dev->ifindex;
 	}
-
+	//设置fwmark和fwmark_mask
 	if (tb[FRA_FWMARK]) {
 		rule->mark = nla_get_u32(tb[FRA_FWMARK]);
 		if (rule->mark)
@@ -269,24 +278,28 @@ static int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 
 	if (tb[FRA_FWMASK])
 		rule->mark_mask = nla_get_u32(tb[FRA_FWMASK]);
-
+	//设置规则的action以及与该规则关联的路由表id，实现规则与路由表的关联
 	rule->action = frh->action;
 	rule->flags = frh->flags;
 	rule->table = frh_get_table(frh, tb);
-
+		/*
+			当没有为策略规则配置优先级也没有默认优先级时，则会调用该协议对应的default_pref获取一个默认的优先级.
+			对于ipv4，其default_pref的原理是获取规则链表中非0优先级中的最高优先级，
+			即获取的默认优先级是除0优先级的规则外，最高的优先级。
+	*/
 	if (!rule->pref && ops->default_pref)
 		rule->pref = ops->default_pref(ops);
 
 	err = -EINVAL;
-	if (tb[FRA_GOTO]) {
+	if (tb[FRA_GOTO]) {//ip rule xxxx goto NUMBER命名
 		if (rule->action != FR_ACT_GOTO)
 			goto errout_free;
-
+		//设置goto跳转的目标路由器
 		rule->target = nla_get_u32(tb[FRA_GOTO]);
 		/* Backward jumps are prohibited to avoid endless loops */
 		if (rule->target <= rule->pref)
 			goto errout_free;
-
+		//寻找goto跳转后的rule规则
 		list_for_each_entry(r, &ops->rules_list, list) {
 			if (r->pref == rule->target) {
 				rule->ctarget = r;
@@ -298,11 +311,14 @@ static int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 			unresolved = 1;
 	} else if (rule->action == FR_ACT_GOTO)
 		goto errout_free;
-
+	//调用协议对应的configure函数，对fib_rule的源、目的ip、tos等值进行配置,IPV4对应fib4_rule_configure()
 	err = ops->configure(rule, skb, nlh, frh, tb);
 	if (err < 0)
 		goto errout_free;
-
+	/*
+		遍历规则链表，找到第一个pref值比当前刚创建的fib rule的pref值大的fib rule:
+		若找到符合要求的规则，则将新创建的策略规则添加到符合要求的规则之前；若在搜索完整个链表仍没有找到符合要求的规则，则将该规则添加到当前链表已有规则的租后，即链尾。
+	*/
 	list_for_each_entry(r, &ops->rules_list, list) {
 		if (r->pref > rule->pref)
 			break;
@@ -362,21 +378,23 @@ static int fib_nl_delrule(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 
 	if (nlh->nlmsg_len < nlmsg_msg_size(sizeof(*frh)))
 		goto errout;
-
+	/*
+		根据应用层传递的协议类型，查找到相应注册的struct fib_rules_ops类型的变量对于ipv4而言，就是fib4_rules_ops
+	*/
 	ops = lookup_rules_ops(net, frh->family);
 	if (ops == NULL) {
 		err = -EAFNOSUPPORT;
 		goto errout;
 	}
-
+	//解析引用层传递的消息
 	err = nlmsg_parse(nlh, sizeof(*frh), tb, FRA_MAX, ops->policy);
 	if (err < 0)
 		goto errout;
-
+	//并对传入的源或者目的地址值进行合理性检查
 	err = validate_rulemsg(frh, tb, ops);
 	if (err < 0)
 		goto errout;
-
+	//遍历规则链表，找到符合要求的规则
 	list_for_each_entry(rule, &ops->rules_list, list) {
 		if (frh->action && (frh->action != rule->action))
 			continue;
@@ -403,13 +421,13 @@ static int fib_nl_delrule(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 		if (!ops->compare(rule, frh, tb))
 			continue;
 
-		if (rule->flags & FIB_RULE_PERMANENT) {
+		if (rule->flags & FIB_RULE_PERMANENT) {//永久rule不允许北删除
 			err = -EPERM;
 			goto errout;
 		}
-
+		//删除匹配的规则
 		list_del_rcu(&rule->list);
-
+		//解决goto规则相关
 		if (rule->action == FR_ACT_GOTO)
 			ops->nr_goto_rules--;
 
@@ -430,9 +448,9 @@ static int fib_nl_delrule(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 
 		synchronize_rcu();
 		notify_rule_change(RTM_DELRULE, rule, ops, nlh,
-				   NETLINK_CB(skb).pid);
-		fib_rule_put(rule);
-		flush_route_cache(ops);
+				   NETLINK_CB(skb).pid);//向应用层投递RTM_DELRULE消息
+		fib_rule_put(rule);//减去对该fib rule的引用计数并决定是否放入fib_rule的缓存中
+		flush_route_cache(ops);//刷新缓存
 		rules_ops_put(ops);
 		return 0;
 	}
@@ -597,7 +615,7 @@ errout:
 static void attach_rules(struct list_head *rules, struct net_device *dev)
 {
 	struct fib_rule *rule;
-
+	//重新赋值rule->ifindex
 	list_for_each_entry(rule, rules, list) {
 		if (rule->ifindex == -1 &&
 		    strcmp(dev->name, rule->ifname) == 0)
@@ -608,7 +626,7 @@ static void attach_rules(struct list_head *rules, struct net_device *dev)
 static void detach_rules(struct list_head *rules, struct net_device *dev)
 {
 	struct fib_rule *rule;
-
+	//将rule->ifindex置为-1，表示无效
 	list_for_each_entry(rule, rules, list)
 		if (rule->ifindex == dev->ifindex)
 			rule->ifindex = -1;
@@ -626,12 +644,12 @@ static int fib_rules_event(struct notifier_block *this, unsigned long event,
 	rcu_read_lock();
 
 	switch (event) {
-	case NETDEV_REGISTER:
+	case NETDEV_REGISTER://网卡注册
 		list_for_each_entry(ops, &net->rules_ops, list)
 			attach_rules(&ops->rules_list, dev);
 		break;
 
-	case NETDEV_UNREGISTER:
+	case NETDEV_UNREGISTER://网卡注销
 		list_for_each_entry(ops, &net->rules_ops, list)
 			detach_rules(&ops->rules_list, dev);
 		break;
@@ -660,9 +678,12 @@ static struct pernet_operations fib_rules_net_ops = {
 static int __init fib_rules_init(void)
 {
 	int err;
-	rtnl_register(PF_UNSPEC, RTM_NEWRULE, fib_nl_newrule, NULL);
-	rtnl_register(PF_UNSPEC, RTM_DELRULE, fib_nl_delrule, NULL);
-	rtnl_register(PF_UNSPEC, RTM_GETRULE, NULL, fib_nl_dumprule);
+	//使用netlink通信机制中的NETLINK_ROUTE，也就是用户使用ip rule命令会触发netlink NETLINK_ROUTE消息
+	//rtnl_register会将函数注册到一个全局rtnl_msg_handlers[protocol][msgtype]中,在NETLINK_ROUTE消息处理函数rtnetlink_rcv()中会根据rtnl_msg_handlers[protocol][msgtype]
+	//来调用对应的函数
+	rtnl_register(PF_UNSPEC, RTM_NEWRULE, fib_nl_newrule, NULL);//创建路由规则
+	rtnl_register(PF_UNSPEC, RTM_DELRULE, fib_nl_delrule, NULL);//删除路由规则
+	rtnl_register(PF_UNSPEC, RTM_GETRULE, NULL, fib_nl_dumprule);//获取路由规则
 
 	err = register_netdevice_notifier(&fib_rules_notifier);
 	if (err < 0)
