@@ -1037,7 +1037,7 @@ static int inetdev_event(struct notifier_block *this, unsigned long event,
 
 	ASSERT_RTNL();
 
-	if (!in_dev) {
+	if (!in_dev) {//配置接口为空
 		if (event == NETDEV_REGISTER) {
 			in_dev = inetdev_init(dev);
 			if (!in_dev)
@@ -1058,17 +1058,22 @@ static int inetdev_event(struct notifier_block *this, unsigned long event,
 	case NETDEV_UP:
 		if (dev->mtu < 68)
 			break;
-		if (dev->flags & IFF_LOOPBACK) {
+		if (dev->flags & IFF_LOOPBACK) {//环回设备
 			struct in_ifaddr *ifa;
-			if ((ifa = inet_alloc_ifa()) != NULL) {
+			if ((ifa = inet_alloc_ifa()) != NULL) {//申请一个ifa，这个是IPV4的地址结构
 				ifa->ifa_local =
-				  ifa->ifa_address = htonl(INADDR_LOOPBACK);
+				  ifa->ifa_address = htonl(INADDR_LOOPBACK);//初始化本机地址和外部地址地址为127.0.0.1
 				ifa->ifa_prefixlen = 8;
-				ifa->ifa_mask = inet_make_mask(8);
+				ifa->ifa_mask = inet_make_mask(8);//掩码
 				in_dev_hold(in_dev);
-				ifa->ifa_dev = in_dev;
-				ifa->ifa_scope = RT_SCOPE_HOST;
+				ifa->ifa_dev = in_dev;//保存地址结构
+				ifa->ifa_scope = RT_SCOPE_HOST;//记录成本机scope
 				memcpy(ifa->ifa_label, dev->name, IFNAMSIZ);
+				/*
+					在in_device 结构中有一个地址结构队列ifa_list,既然是本地回接地址,则必须通过inet_insert_ifa()函数将fa插入到fa list 队列中。
+					由inetinsert ifa)函数根据ifa 的码地址范围和状态标志等内容确定插入的位置,并且在 inet_insert_ifa()函数的最后会通过rtmsg_ifa 和 
+					blocking_notifier_call chain 函数向内核发送通知，调用通知链来更新路由表;netlink 的监听进程也会知道这个新增的 ifa 结构变量。
+				*/
 				inet_insert_ifa(ifa);
 			}
 		}

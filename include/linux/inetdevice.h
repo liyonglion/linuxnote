@@ -16,15 +16,15 @@ struct ipv4_devconf
 	int	data[__NET_IPV4_CONF_MAX - 1];
 	DECLARE_BITMAP(state, __NET_IPV4_CONF_MAX - 1);
 };
-
+//in device结构包含了关于IPV4的一些地址信息
 struct in_device
 {
-	struct net_device	*dev;
-	atomic_t		refcnt;
-	int			dead;
-	struct in_ifaddr	*ifa_list;	/* IP ifaddr chain		*/
-	rwlock_t		mc_list_lock;
-	struct ip_mc_list	*mc_list;	/* IP multicast filter chain    */
+	struct net_device	*dev;//指向对应的 net device 网络设备结构
+	atomic_t		refcnt;//使用计数器，防止结构被释放
+	int			dead;//与 refcnt 联合决定是否释放结构
+	struct in_ifaddr	*ifa_list;	/* IP ifaddr chain	IPV4地址队列	*/
+	rwlock_t		mc_list_lock; //组播队列锁
+	struct ip_mc_list	*mc_list;	/* IP multicast filter chain   IPV4组播过滤链 */
 	spinlock_t		mc_tomb_lock;
 	struct ip_mc_list	*mc_tomb;
 	unsigned long		mr_v1_seen;
@@ -33,8 +33,8 @@ struct in_device
 	unsigned char		mr_qrv;
 	unsigned char		mr_gq_running;
 	unsigned char		mr_ifc_count;
-	struct timer_list	mr_gq_timer;	/* general query timer */
-	struct timer_list	mr_ifc_timer;	/* interface change timer */
+	struct timer_list	mr_gq_timer;	/* general query timer 通用查询计时器 */
+	struct timer_list	mr_ifc_timer;	/* interface change timer 接口改变的计时器*/
 
 	struct neigh_parms	*arp_parms;
 	struct ipv4_devconf	cnf;
@@ -120,7 +120,7 @@ struct in_ifaddr
 	unsigned char		ifa_scope;
 	unsigned char		ifa_flags;
 	unsigned char		ifa_prefixlen;
-	char			ifa_label[IFNAMSIZ];
+	char			ifa_label[IFNAMSIZ];//设备名
 };
 
 extern int register_inetaddr_notifier(struct notifier_block *nb);

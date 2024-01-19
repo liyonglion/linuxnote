@@ -48,9 +48,9 @@
  */
 
 struct notifier_block {
-	int (*notifier_call)(struct notifier_block *, unsigned long, void *);
-	struct notifier_block *next;
-	int priority;
+	int (*notifier_call)(struct notifier_block *, unsigned long, void *);//通知调用函数
+	struct notifier_block *next;//指向下一个通知节点，从而组成链表
+	int priority;//优先级
 };
 
 struct atomic_notifier_head {
