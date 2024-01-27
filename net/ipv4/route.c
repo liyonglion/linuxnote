@@ -2479,6 +2479,7 @@ static int ip_route_output_slow(struct net *net, struct rtable **rp,
 			goto make_route;
 		}
 		if (dev_out)
+
 			dev_put(dev_out);
 		err = -ENETUNREACH;
 		goto out;
@@ -2505,7 +2506,7 @@ static int ip_route_output_slow(struct net *net, struct rtable **rp,
 		fib_select_multipath(&fl, &res);//多路径查询
 	else
 #endif
-	if (!res.prefixlen && res.type == RTN_UNICAST && !fl.oif)
+	if (!res.prefixlen && res.type == RTN_UNICAST && !fl.oif)//上面路由查询出掩码长度为0，且为单播地址且没有指定发送设备
 		fib_select_default(net, &fl, &res);//查找路由信息
 
 	if (!fl.fl4_src)
@@ -3096,7 +3097,7 @@ int __init ip_rt_init(void)
 	if (!ip_rt_acct)
 		panic("IP: failed to allocate ip_rt_acct\n");
 #endif
-	//路由缓存池
+	//路由缓存内存池
 	ipv4_dst_ops.kmem_cachep =
 		kmem_cache_create("ip_dst_cache", sizeof(struct rtable), 0,
 				  SLAB_HWCACHE_ALIGN|SLAB_PANIC, NULL);
@@ -3119,7 +3120,7 @@ int __init ip_rt_init(void)
 	//设置gc时间和缓存最大数量
 	ipv4_dst_ops.gc_thresh = (rt_hash_mask + 1);
 	ip_rt_max_size = (rt_hash_mask + 1) * 16;
-	//初始化
+	//网卡相关的通知连(网卡的注册、up、down事件处理)，注册ip address相关命令处理函数
 	devinet_init();
 	//注册通知链和创建alias缓存，注册ip route 处理函数
 	ip_fib_init();
@@ -3139,14 +3140,14 @@ int __init ip_rt_init(void)
 		ip_rt_secret_interval;
 	add_timer(&rt_secret_timer);
 
-	if (ip_rt_proc_init())
+	if (ip_rt_proc_init())//向网络命名空间下的/proc文件系统注册rt_cache
 		printk(KERN_ERR "Unable to create route proc files\n");
 #ifdef CONFIG_XFRM
 	xfrm_init();
 	xfrm4_init();
 #endif
 	//注册netlink消息
-	rtnl_register(PF_INET, RTM_GETROUTE, inet_rtm_getroute, NULL);
+	rtnl_register(PF_INET, RTM_GETROUTE, inet_rtm_getroute, NULL);//ip route get命令处理
 
 	return rc;
 }

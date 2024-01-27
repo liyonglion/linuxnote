@@ -222,7 +222,7 @@ static inline unsigned int fib_info_hashfn(const struct fib_info *fi)
 
 	return (val ^ (val >> 7) ^ (val >> 12)) & mask;
 }
-
+//完全匹配，包括MSS、TOS、TTL、MTU(这些都保存在fib_info.fib_metrics中)以及下一跳
 static struct fib_info *fib_find_info(const struct fib_info *nfi)
 {
 	struct hlist_head *head;
@@ -231,20 +231,20 @@ static struct fib_info *fib_find_info(const struct fib_info *nfi)
 	unsigned int hash;
 
 	hash = fib_info_hashfn(nfi);
-	head = &fib_info_hash[hash];
+	head = &fib_info_hash[hash];//所有的fib_info都保存再fib_info_hash中
 
 	hlist_for_each_entry(fi, node, head, fib_hash) {
-		if (fi->fib_net != nfi->fib_net)
+		if (fi->fib_net != nfi->fib_net)//是否同一个net namespace?
 			continue;
-		if (fi->fib_nhs != nfi->fib_nhs)
+		if (fi->fib_nhs != nfi->fib_nhs)//下一跳数是否一样?
 			continue;
-		if (nfi->fib_protocol == fi->fib_protocol &&
-		    nfi->fib_prefsrc == fi->fib_prefsrc &&
-		    nfi->fib_priority == fi->fib_priority &&
+		if (nfi->fib_protocol == fi->fib_protocol &&//protocol是否一样?
+		    nfi->fib_prefsrc == fi->fib_prefsrc &&//源地址是否一样?
+		    nfi->fib_priority == fi->fib_priority &&//优先级是否一样?
 		    memcmp(nfi->fib_metrics, fi->fib_metrics,
-			   sizeof(fi->fib_metrics)) == 0 &&
-		    ((nfi->fib_flags^fi->fib_flags)&~RTNH_F_DEAD) == 0 &&
-		    (nfi->fib_nhs == 0 || nh_comp(fi, nfi) == 0))
+			   sizeof(fi->fib_metrics)) == 0 &&//MSS、TOS、TTL、MTU(这些都保存在fib_info.fib_metrics中)是否一样?
+		    ((nfi->fib_flags^fi->fib_flags)&~RTNH_F_DEAD) == 0 &&//fib_flags是否一样?
+		    (nfi->fib_nhs == 0 || nh_comp(fi, nfi) == 0))//下一跳是否一样?
 			return fi;
 	}
 
@@ -358,7 +358,7 @@ int fib_detect_death(struct fib_info *fi, int order,
 {
 	struct neighbour *n;
 	int state = NUD_NONE;
-
+	//查询邻居系统，也就是在二层判断是否能达到
 	n = neigh_lookup(&arp_tbl, &fi->fib_nh[0].nh_gw, fi->fib_dev);
 	if (n) {
 		state = n->nud_state;
@@ -390,7 +390,7 @@ static int fib_count_nexthops(struct rtnexthop *rtnh, int remaining)
 	/* leftover implies invalid nexthop configuration, discard it */
 	return remaining > 0 ? 0 : nhs;
 }
-//函数的主要作用:将rtnh的属性结构中的内容复制到fi.fib_nh中
+//函数的主要作用:将rtnh的属性结构中的内容复制到fib_info.fib_nh中
 static int fib_get_nhs(struct fib_info *fi, struct rtnexthop *rtnh,
 		       int remaining, struct fib_config *cfg)
 {
@@ -521,7 +521,13 @@ int fib_nh_match(struct fib_config *cfg, struct fib_info *fi)
 						|
 						|-> {local prefix} (terminal node)
  */
-
+/*
+1. 下一跳指定了gw。
+	a. 如果网关是直连在本机的网卡上(用户手动指定网卡)，那么将该网卡dev赋值给nh->nh_dev，设置nh->nh_scope = RT_SCOPE_LINK
+	b. 网关是直连在其他网卡上的（用户没有指定网卡），则需要查询该网关对应的路由表，将该路由表的路由信息赋值给nh->nh_dev和nh->nh_scope
+2. 如果下一跳指定了dev，那么将dev赋值给nh->nh_dev，设置nh->nh_scope = RT_SCOPE_HOST
+注意：无论上面那种情况，都必须要出接口。
+*/
 static int fib_check_nh(struct fib_config *cfg, struct fib_info *fi,
 			struct fib_nh *nh)
 {
@@ -539,9 +545,9 @@ static int fib_check_nh(struct fib_config *cfg, struct fib_info *fi,
 		if (nh->nh_flags&RTNH_F_ONLINK) {//指定了onlink参数，告诉路由网关就直连在这个网卡上。一般用于路由通向虚拟设备
 			struct net_device *dev;
 
-			if (cfg->fc_scope >= RT_SCOPE_LINK)//是否在本地子网范围内
+			if (cfg->fc_scope >= RT_SCOPE_LINK)//不能时本地子网范围内。比RT_SCOPE_LINK大只有RT_SCOPE_HOST和RT_SCOPE_NOWHERE
 				return -EINVAL;
-			if (inet_addr_type(net, nh->nh_gw) != RTN_UNICAST)//检查是否单播
+			if (inet_addr_type(net, nh->nh_gw) != RTN_UNICAST)//只能时单播地址
 				return -EINVAL;
 			if ((dev = __dev_get_by_index(net, nh->nh_oif)) == NULL)//通过index查询到出口网卡的信息
 				return -ENODEV;
@@ -585,7 +591,7 @@ static int fib_check_nh(struct fib_config *cfg, struct fib_info *fi,
 out:
 		fib_res_put(&res);
 		return err;
-	} else {
+	} else {//没有配置gw，而是配置本地网卡，说明下一跳的范围就在本机范围
 		struct in_device *in_dev;
 
 		if (nh->nh_flags&(RTNH_F_PERVASIVE|RTNH_F_ONLINK))
@@ -691,13 +697,21 @@ static void fib_hash_move(struct hlist_head *new_info_hash,
 	fib_hash_free(old_info_hash, bytes);
 	fib_hash_free(old_laddrhash, bytes);
 }
-
+/*
+1. 创建fib_info对象，并根据cfg进行初始化
+2. 将mss、mtu等信息保存到fibinfo.metrics中
+3. 将下一跳解析到fibinfo.fc_mp中
+4. 如果添加的路由项是本机范围，则不能配置多路径和网关，并获取下一跳的网卡信息；如果非本机范围，则需要检查下一跳是否可到达
+5. 如果指定了源地址，则需要检查指定的源地址是否是本机地址
+6. 检查是否存在完全一样相同的路由信息结构。有则返回旧的fib_info
+7. 没有完全一样的fib_info，则使用1中创建的对象加入到fib_info_hash队列中；如果制定了源地址，则将新创建的对象加入到fib_info_laddrhash队列中；
+*/
 struct fib_info *fib_create_info(struct fib_config *cfg)
 {
 	int err;
 	struct fib_info *fi = NULL;
 	struct fib_info *ofi;
-	int nhs = 1;
+	int nhs = 1;//默认下一跳数量，即配置的gw参数
 	struct net *net = cfg->fc_nlinfo.nl_net;
 
 	/* Fast check to catch the most weird cases */
@@ -711,7 +725,7 @@ struct fib_info *fib_create_info(struct fib_config *cfg)
 			goto err_inval;
 	}
 #endif
-
+	/*fib_hash_move先不分析*/
 	err = -ENOBUFS;
 	if (fib_info_cnt >= fib_hash_size) {//总路由项超过了队列大小，进行扩容
 		unsigned int new_size = fib_hash_size << 1;//翻倍
@@ -728,7 +742,7 @@ struct fib_info *fib_create_info(struct fib_config *cfg)
 			fib_hash_free(new_info_hash, bytes);
 			fib_hash_free(new_laddrhash, bytes);
 		} else
-			fib_hash_move(new_info_hash, new_laddrhash, new_size);//调用fibhash_move)将全部的 fib info路由信息从旧的哈希表队列中摘下,然后链人到两个刚刚创建的哈希表队列中
+			fib_hash_move(new_info_hash, new_laddrhash, new_size);//调用fibhash_move将全部的 fib_info路由信息从旧的哈希表队列中摘下,然后链入到两个刚刚创建的哈希表队列中
 
 		if (!fib_hash_size)
 			goto failure;
@@ -747,10 +761,10 @@ struct fib_info *fib_create_info(struct fib_config *cfg)
 
 	fi->fib_nhs = nhs;
 	change_nexthops(fi) {
-		nh->nh_parent = fi;//让所有下一跳转结构都来“结亲”
+		nh->nh_parent = fi;//让所有下一跳转结构都来关联fib_info
 	} endfor_nexthops(fi)
 
-	if (cfg->fc_mx) {//如果指定了netlink的属性队列
+	if (cfg->fc_mx) {//存在netlink的nlattr属性队列
 		struct nlattr *nla;
 		int remaining;
 		//循环对取得每个属性结构
@@ -765,23 +779,23 @@ struct fib_info *fib_create_info(struct fib_config *cfg)
 		}
 	}
 
-	if (cfg->fc_mp) {//如果指定了“下一个跳转”结构队列
+	if (cfg->fc_mp) {//用户配置了路由多路径
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
-		err = fib_get_nhs(fi, cfg->fc_mp, cfg->fc_mp_len, cfg);
+		err = fib_get_nhs(fi, cfg->fc_mp, cfg->fc_mp_len, cfg);//解析路由多路径
 		if (err != 0)
 			goto failure;
-		if (cfg->fc_oif && fi->fib_nh->nh_oif != cfg->fc_oif)
+		if (cfg->fc_oif && fi->fib_nh->nh_oif != cfg->fc_oif)//检查路由多路径中配置的出接口是否与配置的路由项的出接口一致
 			goto err_inval;
-		if (cfg->fc_gw && fi->fib_nh->nh_gw != cfg->fc_gw)
+		if (cfg->fc_gw && fi->fib_nh->nh_gw != cfg->fc_gw) //检查路由多路径中配置的网关是否与配置的路由项的网关一致
 			goto err_inval;
 #ifdef CONFIG_NET_CLS_ROUTE
-		if (cfg->fc_flow && fi->fib_nh->nh_tclassid != cfg->fc_flow)
+		if (cfg->fc_flow && fi->fib_nh->nh_tclassid != cfg->fc_flow)//检查路由多路径中配置的流控是否与配置的路由项的流控一致
 			goto err_inval;
 #endif
-#else
+#else //配置了路由多路径，而系统不支持，此处返回错误
 		goto err_inval;
 #endif
-	} else {//分配默认nexthop
+	} else {//用户没有指定多路径，仅有gw一条next hop出路径，加入到fib_info的fib_nh数组中
 		struct fib_nh *nh = fi->fib_nh;
 
 		nh->nh_oif = cfg->fc_oif;
@@ -794,9 +808,9 @@ struct fib_info *fib_create_info(struct fib_config *cfg)
 		nh->nh_weight = 1;
 #endif
 	}
-
+	//根据路由type检查是否支持
 	if (fib_props[cfg->fc_type].error) {
-		if (cfg->fc_gw || cfg->fc_oif || cfg->fc_mp)
+		if (cfg->fc_gw || cfg->fc_oif || cfg->fc_mp)//没有配置gw、出接口、多路径则返回错误
 			goto err_inval;
 		goto link_it;
 	}
@@ -807,7 +821,7 @@ struct fib_info *fib_create_info(struct fib_config *cfg)
 	if (cfg->fc_scope == RT_SCOPE_HOST) {//路由范围是否属本机范围
 		struct fib_nh *nh = fi->fib_nh;
 
-		/* Local address is added. 检查跳转次数和网关地址*/
+		/* Local address is added. 检查跳转次数和网关地址。路由范围是本机，不需要配置多路径且不用配置网关*/
 		if (nhs != 1 || nh->nh_gw)
 			goto err_inval;
 		nh->nh_scope = RT_SCOPE_NOWHERE;//修改跳转范围，就在本地那也不去
@@ -825,12 +839,12 @@ struct fib_info *fib_create_info(struct fib_config *cfg)
 	if (fi->fib_prefsrc) {//如果指定了路由源地址则检查其地址类型
 		if (cfg->fc_type != RTN_LOCAL || !cfg->fc_dst ||
 		    fi->fib_prefsrc != cfg->fc_dst)
-			if (inet_addr_type(net, fi->fib_prefsrc) != RTN_LOCAL)
+			if (inet_addr_type(net, fi->fib_prefsrc) != RTN_LOCAL)//检查路由源地址是否是本地地址
 				goto err_inval;
 	}
 
 link_it:
-	if ((ofi = fib_find_info(fi)) != NULL) {//检查是否存在相同的路由信息结构
+	if ((ofi = fib_find_info(fi)) != NULL) {//检查是否存在完全一样相同的路由信息结构
 		fi->fib_dead = 1;
 		free_fib_info(fi);
 		ofi->fib_treeref++;
@@ -841,11 +855,11 @@ link_it:
 	atomic_inc(&fi->fib_clntref);
 	spin_lock_bh(&fib_info_lock);
 	hlist_add_head(&fi->fib_hash,
-		       &fib_info_hash[fib_info_hashfn(fi)]);//链入路由信息结构队列
+		       &fib_info_hash[fib_info_hashfn(fi)]);//链入路由信息结构队列，所有的路由信息结构都保存在fib_info_hash队列中
 	if (fi->fib_prefsrc) {
 		struct hlist_head *head;
 
-		head = &fib_info_laddrhash[fib_laddr_hashfn(fi->fib_prefsrc)];//如果指定了 IP 地址，还要链人另一个路由地址队列
+		head = &fib_info_laddrhash[fib_laddr_hashfn(fi->fib_prefsrc)];//如果指定了源 IP 地址，还要链人另一个路由地址队列
 		hlist_add_head(&fi->fib_lhash, head);
 	}
 	change_nexthops(fi) {//循环取得路由信息中的每一个跳转结构
@@ -856,7 +870,7 @@ link_it:
 			continue;
 		hash = fib_devindex_hashfn(nh->nh_dev->ifindex);//确定设备的哈希值
 		head = &fib_info_devhash[hash];//在路由设备的哈希数组中找到队列头
-		hlist_add_head(&nh->nh_hash, head);//链入路由设备队列
+		hlist_add_head(&nh->nh_hash, head);//下一跳结构链入路由设备队列
 	} endfor_nexthops(fi)
 	spin_unlock_bh(&fib_info_lock);
 	return fi;
@@ -881,6 +895,10 @@ res：匹配结果
 zone: 上层的hashkey
 mask：掩码
 prefixlen: 掩码长度
+匹配流程：
+1. 报文的tos值必须相等
+2. 报文的网络范围必须小于路由项的网络范围(网络(此处特意加了网络二字是为了与内核定义的scope枚举不同)范围：golbal > link > host,而内核定义scope枚举值：RT_SCOPE_UNIVERSE = 0 < LINK = 253 < HOST = 254)
+3. 报文的出接口必须和路由项的出接口必须相等
 */
 int fib_semantic_match(struct list_head *head, const struct flowi *flp,
 		       struct fib_result *res, __be32 zone, __be32 mask,
@@ -895,7 +913,10 @@ int fib_semantic_match(struct list_head *head, const struct flowi *flp,
 		if (fa->fa_tos &&
 		    fa->fa_tos != flp->fl4_tos)
 			continue;
-		//2. scope值必须大于匹配的scope值
+		/*2. scope值必须大于匹配的scope值。
+		“报文”（也不知道叫什么好）的scope必须小于路由项的scope，才会往下匹配。因为数值越大，网络的范围越小，也就是“报文”的网络范围必须要小于路由项的网络范围。
+		例如：fa->fa_scope = 0(golbal),flp->fl4_scope = 1,只能fa->fa_scope = 253(link)和fa->fa_scope = 254(link)才能匹配上,该例子见fib_check_nh()函数
+		*/
 		if (fa->fa_scope < flp->fl4_scope)
 			continue;
 
@@ -907,7 +928,6 @@ int fib_semantic_match(struct list_head *head, const struct flowi *flp,
 
 			if (fi->fib_flags & RTNH_F_DEAD)//下一跳是否正常
 				continue;
-			// 出接口是否一致
 			switch (fa->fa_type) {
 			case RTN_UNICAST:
 			case RTN_LOCAL:
@@ -920,12 +940,12 @@ int fib_semantic_match(struct list_head *head, const struct flowi *flp,
 					if (!flp->oif || flp->oif == nh->nh_oif)//判断出接口是否一致，一致说明匹配上
 						break;
 				}
-#ifdef CONFIG_IP_ROUTE_MULTIPATH
-				if (nhsel < fi->fib_nhs) {
+#ifdef CONFIG_IP_ROUTE_MULTIPATH //支持多路径路由
+				if (nhsel < fi->fib_nhs) {//找到下一跳
 					nh_sel = nhsel;
 					goto out_fill_res;
 				}
-#else
+#else //不支持多路径路由，此时fi->fib_nhs 一定等于 1,仅有的一条下一跳一定是配置的网关信息
 				if (nhsel < 1) {//小于1说明匹配上了，大于1 说明没有找到路由
 					goto out_fill_res;
 				}

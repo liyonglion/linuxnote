@@ -48,7 +48,7 @@
 #include <net/rtnetlink.h>
 
 #ifndef CONFIG_IP_MULTIPLE_TABLES
-
+//没有多路由表时，初始化路由表函数表
 static int __net_init fib4_rules_init(struct net *net)
 {
 	struct fib_table *local_table, *main_table;
@@ -83,7 +83,7 @@ struct fib_table *fib_new_table(struct net *net, u32 id)
 	tb = fib_get_table(net, id);
 	if (tb)//存在直接返回
 		return tb;
-	//创建路由表
+	//创建路由表,延迟创建。当系统启动时，没有路由表，当新增路由项的时会创建该路由表
 	tb = fib_hash_table(id);
 	if (!tb)
 		return NULL;
@@ -520,7 +520,7 @@ static int rtm_to_fib_config(struct net *net, struct sk_buff *skb,
 	struct nlattr *attr;
 	int err, remaining;
 	struct rtmsg *rtm;
-
+	//校验netlink消息的合法性，包括nla
 	err = nlmsg_validate(nlh, sizeof(*rtm), RTA_MAX, rtm_ipv4_policy);
 	if (err < 0)
 		goto errout;
@@ -528,54 +528,54 @@ static int rtm_to_fib_config(struct net *net, struct sk_buff *skb,
 	memset(cfg, 0, sizeof(*cfg));
 
 	rtm = nlmsg_data(nlh);
-	cfg->fc_dst_len = rtm->rtm_dst_len;
-	cfg->fc_tos = rtm->rtm_tos;
-	cfg->fc_table = rtm->rtm_table;
-	cfg->fc_protocol = rtm->rtm_protocol;
-	cfg->fc_scope = rtm->rtm_scope;
-	cfg->fc_type = rtm->rtm_type;
-	cfg->fc_flags = rtm->rtm_flags;
-	cfg->fc_nlflags = nlh->nlmsg_flags;
+	cfg->fc_dst_len = rtm->rtm_dst_len;//保存目标掩码长度
+	cfg->fc_tos = rtm->rtm_tos;//保存TOS
+	cfg->fc_table = rtm->rtm_table;//保存路由表号
+	cfg->fc_protocol = rtm->rtm_protocol;//保存路由协议
+	cfg->fc_scope = rtm->rtm_scope; //保存路由作用域
+	cfg->fc_type = rtm->rtm_type; //保存路由类型
+	cfg->fc_flags = rtm->rtm_flags; //保存路由标志
+	cfg->fc_nlflags = nlh->nlmsg_flags;//保存netlink标志
 
-	cfg->fc_nlinfo.pid = NETLINK_CB(skb).pid;
-	cfg->fc_nlinfo.nlh = nlh;
-	cfg->fc_nlinfo.nl_net = net;
+	cfg->fc_nlinfo.pid = NETLINK_CB(skb).pid;//保存创建该路由的pid
+	cfg->fc_nlinfo.nlh = nlh;//保存netlink消息头
+	cfg->fc_nlinfo.nl_net = net; //保存所属网络命名空间
 
 	if (cfg->fc_type > RTN_MAX) {
 		err = -EINVAL;
 		goto errout;
 	}
-
+	//遍历nla
 	nlmsg_for_each_attr(attr, nlh, sizeof(struct rtmsg), remaining) {
 		switch (nla_type(attr)) {
 		case RTA_DST:
-			cfg->fc_dst = nla_get_be32(attr);
+			cfg->fc_dst = nla_get_be32(attr);//保存目的地址
 			break;
 		case RTA_OIF:
-			cfg->fc_oif = nla_get_u32(attr);
+			cfg->fc_oif = nla_get_u32(attr);//保存出接口设备索引
 			break;
 		case RTA_GATEWAY:
-			cfg->fc_gw = nla_get_be32(attr);
+			cfg->fc_gw = nla_get_be32(attr);//保存网关地址
 			break;
 		case RTA_PRIORITY:
-			cfg->fc_priority = nla_get_u32(attr);
+			cfg->fc_priority = nla_get_u32(attr);//保存优先级
 			break;
 		case RTA_PREFSRC:
-			cfg->fc_prefsrc = nla_get_be32(attr);
+			cfg->fc_prefsrc = nla_get_be32(attr);//保存源地址
 			break;
 		case RTA_METRICS:
-			cfg->fc_mx = nla_data(attr);
-			cfg->fc_mx_len = nla_len(attr);
+			cfg->fc_mx = nla_data(attr);//保存路由metrics。数组形式
+			cfg->fc_mx_len = nla_len(attr);//数组长度
 			break;
 		case RTA_MULTIPATH:
-			cfg->fc_mp = nla_data(attr);
-			cfg->fc_mp_len = nla_len(attr);
+			cfg->fc_mp = nla_data(attr);//保存路由multipath。数组形式
+			cfg->fc_mp_len = nla_len(attr);//数组长度
 			break;
 		case RTA_FLOW:
 			cfg->fc_flow = nla_get_u32(attr);
 			break;
 		case RTA_TABLE:
-			cfg->fc_table = nla_get_u32(attr);
+			cfg->fc_table = nla_get_u32(attr);//保存路由表号
 			break;
 		}
 	}
@@ -591,17 +591,17 @@ static int inet_rtm_delroute(struct sk_buff *skb, struct nlmsghdr* nlh, void *ar
 	struct fib_config cfg;
 	struct fib_table *tb;
 	int err;
-
+	//将netlink 消息转换成fib_config
 	err = rtm_to_fib_config(net, skb, nlh, &cfg);
 	if (err < 0)
 		goto errout;
-
+	//获取对应的路由表
 	tb = fib_get_table(net, cfg.fc_table);
 	if (tb == NULL) {
 		err = -ESRCH;
 		goto errout;
 	}
-
+	//调用fn_hash_delete()函数
 	err = tb->tb_delete(tb, &cfg);
 errout:
 	return err;
@@ -613,18 +613,18 @@ static int inet_rtm_newroute(struct sk_buff *skb, struct nlmsghdr* nlh, void *ar
 	struct fib_config cfg;
 	struct fib_table *tb;
 	int err;
-
+	//将netlink 消息转换成fib_config
 	err = rtm_to_fib_config(net, skb, nlh, &cfg);
 	if (err < 0)
 		goto errout;
-
+	//这个函数虽然带有new关键词，而是先查找一个table，如果不存在就new一个table。
 	tb = fib_new_table(net, cfg.fc_table);
 	if (tb == NULL) {
 		err = -ENOBUFS;
 		goto errout;
 	}
-
-	err = tb->tb_insert(tb, &cfg);
+	//调用fn_hash_insert()函数
+	err = tb->tb_insert(tb, &cfg);//调用fn_hash_insert()函数
 errout:
 	return err;
 }
@@ -721,7 +721,7 @@ void fib_add_ifaddr(struct in_ifaddr *ifa)
 	struct in_ifaddr *prim = ifa;
 	__be32 mask = ifa->ifa_mask;
 	__be32 addr = ifa->ifa_local;
-	__be32 prefix = ifa->ifa_address&mask;
+	__be32 prefix = ifa->ifa_address&mask;//地址&掩码
 
 	if (ifa->ifa_flags&IFA_F_SECONDARY) {
 		prim = inet_ifa_byprefix(in_dev, prefix, mask);
@@ -981,12 +981,12 @@ static int __net_init ip_fib_net_init(struct net *net)
 {
 	int err;
 	unsigned int i;
-	//为路由函数表队列分配空间
+	//为路由表队列分配空间。所有的路由表都会加入到该队列数组中
 	net->ipv4.fib_table_hash = kzalloc(
 			sizeof(struct hlist_head)*FIB_TABLE_HASHSZ, GFP_KERNEL);
 	if (net->ipv4.fib_table_hash == NULL)
 		return -ENOMEM;
-	//初始化每个队列头。FIB_TABLE_HASHSZ定义为266，标识只能定义256个路由表
+	//初始化每个队列头。FIB_TABLE_HASHSZ定义为266
 	for (i = 0; i < FIB_TABLE_HASHSZ; i++)
 		INIT_HLIST_HEAD(&net->ipv4.fib_table_hash[i]);
 	//初始化本地路由函数表和主路由函数表并链入到路由函数表队列数组中
@@ -1030,6 +1030,7 @@ static int __net_init fib_net_init(struct net *net)
 	error = ip_fib_net_init(net);
 	if (error < 0)
 		goto out;
+	//创建netlink NETLINK_FIB_LOOKUP类型套接字
 	error = nl_fib_lookup_init(net);
 	if (error < 0)
 		goto out_nlfl;
@@ -1060,16 +1061,17 @@ static struct pernet_operations fib_net_ops = {
 
 void __init ip_fib_init(void)
 {
-	//使用netlink通信机制中的NETLINK_ROUTE，也就是用户使用ip route命令会触发netlink NETLINK_ROUTE消息
-	//rtnl_register会将函数注册到一个全局rtnl_msg_handlers[protocol][msgtype]中,在NETLINK_ROUTE消息处理函数rtnetlink_rcv()中会根据rtnl_msg_handlers[protocol][msgtype]
-	//来调用对应的函数
+	/*使用netlink通信机制中的NETLINK_ROUTE，也就是用户使用ip route add命令会触发RTM_NEWROUTE消息,
+	rtnl_register会将函数注册到一个全局rtnl_msg_handlers[protocol][msgtype]中,
+	在NETLINK_ROUTE消息处理函数rtnetlink_rcv()中会根据rtnl_msg_handlers[protocol][msgtype]来调用对应的函数
+	*/
 	rtnl_register(PF_INET, RTM_NEWROUTE, inet_rtm_newroute, NULL);//注册ip route add处理函数
 	rtnl_register(PF_INET, RTM_DELROUTE, inet_rtm_delroute, NULL);//注册ip route del处理函数
 	rtnl_register(PF_INET, RTM_GETROUTE, NULL, inet_dump_fib);//注册ip route get处理函数
-
+	//函数在net/core/net_namespace.c中，其中.init函数会初始化ip rule相关
 	register_pernet_subsys(&fib_net_ops);
-	register_netdevice_notifier(&fib_netdev_notifier);
-	register_inetaddr_notifier(&fib_inetaddr_notifier);
+	register_netdevice_notifier(&fib_netdev_notifier);//注册设备上下线通知
+	register_inetaddr_notifier(&fib_inetaddr_notifier);//注册地址添加删除通知
 
 	fib_hash_init();
 }

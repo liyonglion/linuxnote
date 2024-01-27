@@ -24,7 +24,7 @@ struct netns_ipv4 {
 #ifdef CONFIG_IP_MULTIPLE_TABLES
 	struct fib_rules_ops	*rules_ops;
 #endif
-	struct hlist_head	*fib_table_hash;
+	struct hlist_head	*fib_table_hash;//路由表hash表,其中队列0 中保存的有local路由表，队列1保存的有main路由表
 	struct sock		*fibnl;
 
 	struct sock		**icmp_sk;

@@ -64,9 +64,9 @@ int fib_lookup(struct net *net, struct flowi *flp, struct fib_result *res)
 		.result = res,
 	};
 	int err;
-
+	//查找路由项。在上一篇文章初始化分析中，net->ipv4.rules_ops保存的是fib4_rules_ops_template
 	err = fib_rules_lookup(net->ipv4.rules_ops, flp, 0, &arg);
-	res->r = arg.rule;
+	res->r = arg.rule;//保存命中的路由rule
 
 	return err;
 }
@@ -151,7 +151,7 @@ static int fib4_rule_configure(struct fib_rule *rule, struct sk_buff *skb,
 
 	if (frh->tos & ~IPTOS_TOS_MASK)
 		goto errout;
-	//table 0表示由系统来创建一个路由表
+	//table 0表示用户没有指定路由表的id，则调用fib_empty_table创建一个路由表
 	if (rule->table == RT_TABLE_UNSPEC) {
 		if (rule->action == FR_ACT_TO_TBL) {
 			struct fib_table *table;
@@ -247,7 +247,18 @@ static int fib4_rule_fill(struct fib_rule *rule, struct sk_buff *skb,
 nla_put_failure:
 	return -ENOBUFS;
 }
-
+//rule 的优先级如果没有指定，则调用该函数进行默认配置优先级。
+//返回当前可用的最大优先级。例如下面例子中，会返回32765
+/*
+lion@lion:~$ ip rule show
+0:      from 127.0.0.1 iif lo ipproto tcp lookup 127
+0:      from 127.0.0.1 iif lo ipproto udp lookup 127
+0:      from all iif lo ipproto tcp lookup 128
+0:      from all iif lo ipproto udp lookup 128
+0:      from all lookup local
+32766:  from all lookup main
+32767:  from all lookup default
+*/
 static u32 fib4_rule_default_pref(struct fib_rules_ops *ops)
 {
 	struct list_head *pos;
@@ -283,10 +294,10 @@ static struct fib_rules_ops fib4_rules_ops_template = {
 	.addr_size	= sizeof(u32),
 	.action		= fib4_rule_action,
 	.match		= fib4_rule_match,
-	.configure	= fib4_rule_configure,
-	.compare	= fib4_rule_compare,
+	.configure	= fib4_rule_configure,//根据用户的传入参数初始化struct fib4_rule对象(继承自fib_rule对象)
+	.compare	= fib4_rule_compare,//比较当前的fib rule对象与用户传入的参数是否匹配
 	.fill		= fib4_rule_fill,
-	.default_pref	= fib4_rule_default_pref,
+	.default_pref	= fib4_rule_default_pref,//取当前可用的最大优先级数值，优先级数值越低，优先级越高
 	.nlmsg_payload	= fib4_rule_nlmsg_payload,
 	.flush_cache	= fib4_rule_flush_cache,
 	.nlgroup	= RTNLGRP_IPV4_RULE,
@@ -322,7 +333,7 @@ int __net_init fib4_rules_init(struct net *net)
 		return -ENOMEM;
 	INIT_LIST_HEAD(&ops->rules_list);
 	ops->fro_net = net;
-
+	//将ops链接到net->rules_ops链表中
 	fib_rules_register(ops);//链接到网络空间结构中的专用队列
 
 	err = fib_default_rules_init(ops);//创建3个路由规则并链接到专用队列

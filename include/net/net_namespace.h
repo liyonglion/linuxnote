@@ -197,8 +197,8 @@ static inline void release_net(struct net *net)
 #endif
 
 struct pernet_operations {
-	struct list_head list;
-	int (*init)(struct net *net);
+	struct list_head list; //用于挂载在net_namespace_list上的链表上
+	int (*init)(struct net *net); //初始化网络命名空间
 	void (*exit)(struct net *net);
 };
 

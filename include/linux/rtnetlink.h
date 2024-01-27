@@ -221,15 +221,15 @@ enum
    Intermediate values are also possible f.e. interior routes
    could be assigned a value between UNIVERSE and LINK.
 */
-
+//值越小，范围越大
 enum rt_scope_t
 {
-	RT_SCOPE_UNIVERSE=0,
+	RT_SCOPE_UNIVERSE=0,//全局地址
 /* User defined values  */
 	RT_SCOPE_SITE=200,
-	RT_SCOPE_LINK=253,
-	RT_SCOPE_HOST=254,
-	RT_SCOPE_NOWHERE=255
+	RT_SCOPE_LINK=253, //同网段地址
+	RT_SCOPE_HOST=254, //本机地址
+	RT_SCOPE_NOWHERE=255 //为不存在的目的地保留
 };
 
 /* rtm_flags */

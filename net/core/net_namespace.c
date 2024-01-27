@@ -219,6 +219,7 @@ static int __init net_ns_init(void)
 pure_initcall(net_ns_init);
 
 #ifdef CONFIG_NET_NS
+//支持网络多命名空间调用函数
 static int register_pernet_operations(struct list_head *list,
 				      struct pernet_operations *ops)
 {
@@ -260,7 +261,7 @@ static void unregister_pernet_operations(struct pernet_operations *ops)
 }
 
 #else
-
+//不支持网络多命名空间调用函数
 static int register_pernet_operations(struct list_head *list,
 				      struct pernet_operations *ops)
 {
@@ -297,6 +298,11 @@ static DEFINE_IDA(net_generic_ids);
  *	are called in the reverse of the order with which they were
  *	registered.
  */
+/*
+该函数的主要作用是将一个网络协议子系统添加到网络命令空间对应的全局链表pernet_list中，并针对每一个注册在net_namespace_list链表中的网络命令空间，
+均执行其ops->init程序进行初始化，一般其ops->init会在其对应的proc目录下，生成一个网络协议模块对应的proc文件或proc目录，并执行一些协议初始化相关的函数。
+
+*/
 int register_pernet_subsys(struct pernet_operations *ops)
 {
 	int error;

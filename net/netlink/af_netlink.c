@@ -1671,21 +1671,21 @@ int netlink_rcv_skb(struct sk_buff *skb, int (*cb)(struct sk_buff *,
 
 	while (skb->len >= nlmsg_total_size(0)) {
 		int msglen;
-
+		//获取消息头
 		nlh = nlmsg_hdr(skb);
 		err = 0;
-
+		//对头大小进行校验
 		if (nlh->nlmsg_len < NLMSG_HDRLEN || skb->len < nlh->nlmsg_len)
 			return 0;
 
-		/* Only requests are handled by the kernel */
+		/* Only requests are handled by the kernel 用户发送的消息必须要设置NLM_F_REQUEST，因为用户发送的是请求*/
 		if (!(nlh->nlmsg_flags & NLM_F_REQUEST))
 			goto ack;
 
 		/* Skip control messages */
 		if (nlh->nlmsg_type < NLMSG_MIN_TYPE)
 			goto ack;
-
+		//使用回调函数进行处理
 		err = cb(skb, nlh);
 		if (err == -EINTR)
 			goto skip;

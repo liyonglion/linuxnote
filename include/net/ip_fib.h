@@ -54,8 +54,8 @@ struct fib_config {
 	u32			fc_priority; //优先级
 	__be32			fc_prefsrc; //源地址
 	struct nlattr		*fc_mx; //将fc_mx的信息都将解析到fib_info.fib_metrics[RTAX_MAX]中
-	struct rtnexthop	*fc_mp; //配置的下一跳数组。例如：ip route add default scope global nexthop dev ppp0 nexthop dev ppp1
-	int			fc_mx_len;
+	struct rtnexthop	*fc_mp; //配置的下一跳数组,多路径下一条。例如：ip route add default scope global nexthop dev ppp0 nexthop dev ppp1
+	int			fc_mx_len; //fc_mx的长度
 	int			fc_mp_len;// 配置的跳转结构的总长度
 	u32			fc_flow;
 	u32			fc_nlflags;
@@ -67,7 +67,7 @@ struct fib_info;
 //NHFLAGS := [ onlink | pervasive ]
 struct fib_nh {
 	struct net_device	*nh_dev; //下一条设备
-	struct hlist_node	nh_hash; 
+	struct hlist_node	nh_hash; //链入fib_info_devhash[hash]链表中
 	struct fib_info		*nh_parent;//持有者
 	unsigned		nh_flags;//上面注释信息NHFLAGS
 	unsigned char		nh_scope; //范围
@@ -79,7 +79,7 @@ struct fib_nh {
 	__u32			nh_tclassid;
 #endif
 	int			nh_oif; //出接口索引
-	__be32			nh_gw; //上面注释的via
+	__be32			nh_gw; //命令中的via
 };
 
 /*
@@ -164,10 +164,10 @@ struct fib_result_nl {
 #define FIB_RES_OIF(res)		(FIB_RES_NH(res).nh_oif)
 
 struct fib_table {//路由表是由fib_table表示。而fib_table则给路由表提供了查询路由信息的操作。为了区分，我们称为路由函数表
-	struct hlist_node tb_hlist;//hash节点，通过ipv4.hlist_head得到属于自己的路由表FIB
+	struct hlist_node tb_hlist;//hash节点，链入到net->ipv4.fib_table_hash 哈希表队列中
 	u32		tb_id;// 标识符(例如：本地路由，主路由，默认路由)
 	unsigned	tb_stamp;// 时间戳
-	int		tb_default;// 路由信息结构队列序号
+	int		tb_default;// 默认路由的最优路由项索引
 	int		(*tb_lookup)(struct fib_table *tb, const struct flowi *flp, struct fib_result *res);// 查找函数
 	int		(*tb_insert)(struct fib_table *, struct fib_config *);// 添加函数
 	int		(*tb_delete)(struct fib_table *, struct fib_config *);// 删除函数

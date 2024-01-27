@@ -1070,8 +1070,8 @@ static int inetdev_event(struct notifier_block *this, unsigned long event,
 				ifa->ifa_scope = RT_SCOPE_HOST;//记录成本机scope
 				memcpy(ifa->ifa_label, dev->name, IFNAMSIZ);
 				/*
-					在in_device 结构中有一个地址结构队列ifa_list,既然是本地回接地址,则必须通过inet_insert_ifa()函数将fa插入到fa list 队列中。
-					由inetinsert ifa)函数根据ifa 的码地址范围和状态标志等内容确定插入的位置,并且在 inet_insert_ifa()函数的最后会通过rtmsg_ifa 和 
+					在in_device 结构中有一个地址结构队列ifa_list,既然是本地回接地址,则必须通过inet_insert_ifa()函数将fa插入到ifa_list 队列中。
+					由inet_insert_ifa函数根据ifa 的地址范围和状态标志等内容确定插入的位置,并且在 inet_insert_ifa()函数的最后会通过rtmsg_ifa 和 
 					blocking_notifier_call chain 函数向内核发送通知，调用通知链来更新路由表;netlink 的监听进程也会知道这个新增的 ifa 结构变量。
 				*/
 				inet_insert_ifa(ifa);
@@ -1648,11 +1648,11 @@ void __init devinet_init(void)
 	register_pernet_subsys(&devinet_ops);
 
 	register_gifconf(PF_INET, inet_gifconf);//注册IO配置程序
-	register_netdevice_notifier(&ip_netdev_notifier);//注册通知节点
+	register_netdevice_notifier(&ip_netdev_notifier);//注册通知节点，响应网卡的注册、up、down事件
 	//注册处理路由地址的netlink
-	rtnl_register(PF_INET, RTM_NEWADDR, inet_rtm_newaddr, NULL);
-	rtnl_register(PF_INET, RTM_DELADDR, inet_rtm_deladdr, NULL);
-	rtnl_register(PF_INET, RTM_GETADDR, NULL, inet_dump_ifaddr);
+	rtnl_register(PF_INET, RTM_NEWADDR, inet_rtm_newaddr, NULL);//ip address add 命令
+	rtnl_register(PF_INET, RTM_DELADDR, inet_rtm_deladdr, NULL);//ip address del 命令
+	rtnl_register(PF_INET, RTM_GETADDR, NULL, inet_dump_ifaddr);//ip addr show 命令
 }
 
 EXPORT_SYMBOL(in_dev_finish_destroy);

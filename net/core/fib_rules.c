@@ -41,7 +41,7 @@ EXPORT_SYMBOL(fib_default_rule_add);
 static void notify_rule_change(int event, struct fib_rule *rule,
 			       struct fib_rules_ops *ops, struct nlmsghdr *nlh,
 			       u32 pid);
-//根据协议簇在链表rules_ops中查找符合要求的struct fib_rules_ops类型的变量对于ipv4而言，即为fib4_rules_ops
+//根据协议簇在链表rules_ops中查找符合要求的struct fib_rules_ops类型的变量对于ipv4而言，即为fib4_rules_ops_template
 static struct fib_rules_ops *lookup_rules_ops(struct net *net, int family)
 {
 	struct fib_rules_ops *ops;
@@ -135,7 +135,7 @@ static int fib_rule_match(struct fib_rule *rule, struct fib_rules_ops *ops,
 {
 	int ret = 0;
 
-	if (rule->ifindex && (rule->ifindex != fl->iif))//规则中存在接口，而匹配的入接口和该接口不一致，则直接返回
+	if (rule->ifindex && (rule->ifindex != fl->iif))//rule中存在入接口网卡设备，而匹配的入接口和该接口不一致，则直接返回
 		goto out;
 
 	if ((rule->mark ^ fl->mark) & rule->mark_mask)//判断mark值是否一样，不一样直接返回
@@ -146,7 +146,7 @@ out:
 	//用户配置ip rule not ,表示要取反操作
 	return (rule->flags & FIB_RULE_INVERT) ? !ret : ret;
 }
-
+//这里的ops是ipv4_rules_ops_template
 int fib_rules_lookup(struct fib_rules_ops *ops, struct flowi *fl,
 		     int flags, struct fib_lookup_arg *arg)
 {
@@ -160,7 +160,6 @@ jumped:
 		if (!fib_rule_match(rule, ops, fl, flags))//是否匹配规则
 			continue;
 		//走到这个位置，说明匹配上
-		
 		if (rule->action == FR_ACT_GOTO) {//配置了ip rule xxx goto yyyy
 			struct fib_rule *target;
 
@@ -174,7 +173,7 @@ jumped:
 		} else if (rule->action == FR_ACT_NOP)//不做任何操作
 			continue;
 		else
-			err = ops->action(rule, fl, flags, arg);//fib4_rule_action() 
+			err = ops->action(rule, fl, flags, arg);//调用fib4_rule_action() 
 
 		if (err != -EAGAIN) {
 			fib_rule_get(rule);
@@ -221,6 +220,7 @@ errout:
 static int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 {
 	struct net *net = sock_net(skb->sk);
+	//获取netlink消息的负载
 	struct fib_rule_hdr *frh = nlmsg_data(nlh);
 	struct fib_rules_ops *ops = NULL;
 	struct fib_rule *rule, *r, *last = NULL;
@@ -230,7 +230,7 @@ static int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 	if (nlh->nlmsg_len < nlmsg_msg_size(sizeof(*frh)))
 		goto errout;
 	/*
-		根据应用层传递的协议类型，查找到相应注册的struct fib_rules_ops类型的变量对于ipv4而言，就是fib4_rules_ops
+		根据应用层传递的协议类型，查找到相应注册的struct fib_rules_ops类型的变量对于ipv4而言，就是fib4_rules_ops_template
 	*/
 	ops = lookup_rules_ops(net, frh->family);
 	if (ops == NULL) {
@@ -281,11 +281,10 @@ static int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 	//设置规则的action以及与该规则关联的路由表id，实现规则与路由表的关联
 	rule->action = frh->action;
 	rule->flags = frh->flags;
-	rule->table = frh_get_table(frh, tb);
+	rule->table = frh_get_table(frh, tb);//用户是否指定了路由表id，没有指定为0，会在下面的ops->configure()中进行创建
 		/*
 			当没有为策略规则配置优先级也没有默认优先级时，则会调用该协议对应的default_pref获取一个默认的优先级.
-			对于ipv4，其default_pref的原理是获取规则链表中非0优先级中的最高优先级，
-			即获取的默认优先级是除0优先级的规则外，最高的优先级。
+			对于ipv4，其default_pref的原理是获取的默认优先级是除0优先级的规则外，最大的可用的优先级值。
 	*/
 	if (!rule->pref && ops->default_pref)
 		rule->pref = ops->default_pref(ops);
@@ -421,7 +420,7 @@ static int fib_nl_delrule(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 		if (!ops->compare(rule, frh, tb))
 			continue;
 
-		if (rule->flags & FIB_RULE_PERMANENT) {//永久rule不允许北删除
+		if (rule->flags & FIB_RULE_PERMANENT) {//永久rule不允许被删除，例如匹配local路由表的rule
 			err = -EPERM;
 			goto errout;
 		}
@@ -678,14 +677,14 @@ static struct pernet_operations fib_rules_net_ops = {
 static int __init fib_rules_init(void)
 {
 	int err;
-	//使用netlink通信机制中的NETLINK_ROUTE，也就是用户使用ip rule命令会触发netlink NETLINK_ROUTE消息
+	//使用netlink通信机制中的NETLINK_ROUTE，用户使用ip rule add命令会触发注册好的RTM_NEWRULE消息
 	//rtnl_register会将函数注册到一个全局rtnl_msg_handlers[protocol][msgtype]中,在NETLINK_ROUTE消息处理函数rtnetlink_rcv()中会根据rtnl_msg_handlers[protocol][msgtype]
 	//来调用对应的函数
 	rtnl_register(PF_UNSPEC, RTM_NEWRULE, fib_nl_newrule, NULL);//创建路由规则
 	rtnl_register(PF_UNSPEC, RTM_DELRULE, fib_nl_delrule, NULL);//删除路由规则
 	rtnl_register(PF_UNSPEC, RTM_GETRULE, NULL, fib_nl_dumprule);//获取路由规则
 
-	err = register_netdevice_notifier(&fib_rules_notifier);
+	err = register_netdevice_notifier(&fib_rules_notifier);//注册网卡上下线的通知链函数
 	if (err < 0)
 		goto fail;
 

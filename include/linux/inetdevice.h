@@ -110,16 +110,16 @@ static inline void ipv4_devconf_setall(struct in_device *in_dev)
 
 struct in_ifaddr
 {
-	struct in_ifaddr	*ifa_next;
-	struct in_device	*ifa_dev;
+	struct in_ifaddr	*ifa_next;//下一个地址，一个网卡可以配置多个IP地址
+	struct in_device	*ifa_dev;//指向对应的 in_device 结构
 	struct rcu_head		rcu_head;
-	__be32			ifa_local;
-	__be32			ifa_address;
-	__be32			ifa_mask;
-	__be32			ifa_broadcast;
-	unsigned char		ifa_scope;
+	__be32			ifa_local; //地址
+	__be32			ifa_address;//地址
+	__be32			ifa_mask;//掩码
+	__be32			ifa_broadcast;//广播地址
+	unsigned char		ifa_scope;//作用域；lo为host，其他的为link
 	unsigned char		ifa_flags;
-	unsigned char		ifa_prefixlen;
+	unsigned char		ifa_prefixlen;//掩码长度
 	char			ifa_label[IFNAMSIZ];//设备名
 };
 

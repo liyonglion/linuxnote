@@ -5,7 +5,7 @@
 #include <linux/list.h>
 #include <net/ip_fib.h>
 
-struct fib_alias {// 路由别名结构，这个结构基本就是最后一次路由筛选了
+struct fib_alias {// 路由别名结构，这个结构基本就是最后一次路由筛选了。
 	struct list_head	fa_list;// 这个是用于链接到fib_node节点中的，看上面的结构体的第二个字段的类型你就懂了~~~~~~
 	struct fib_info		*fa_info;// 这是很重要的字段：顾名思义，就是具体怎么处置这个数据包的操作等
 	u8			fa_tos;// 服务类型TOS

@@ -36,11 +36,28 @@ struct sockaddr_nl
 	__u32		nl_pid;		/* port ID	*/
        	__u32		nl_groups;	/* multicast groups mask */
 };
-
+//详情见：https://blog.guorongfei.com/2015/01/23/libnl-translation-part2/
 struct nlmsghdr
 {
 	__u32		nlmsg_len;	/* Length of message including header */
+	/*
+	Netlink 在请求消息（requests）、通知消息（notifications）和应答消息（replies）的 处理上是有区别的。请求消息设有 NLM_F_REQUEST 标志位，它用来向接收方请求某种响应 。
+	一般来说请求消息都是从用户空间发送到内核的。虽然不是强制规定，但每次发送的请求 消息序列号都应该是上一个序列号加一。
+	由于请求自身的特性，接收方在收到请求消息之后可能会发送另一条 netlink 消息来响应 这个请求。应答消息的序列号必须和它响应的那条请求消息的序列号一致。
+	通知消息则没有那么严谨，它不需要应答，所以序列号通常是被设置成 0 的。
+	NLMSG_NOOP - 无需任何操作，消息必须被丢弃
+	NLMSG_ERROR - 错误消息或者是 ACK，
+	NLMSG_DONE - 分段序列的结束，
+	NLMSG_OVERRUN - 通知信息越界（错误）[Overrun notification]
+	*/
 	__u16		nlmsg_type;	/* Message content */
+	/*
+	NLM_F_REQUEST - 这个消息是请求消息
+	NLM_F_MULTI - 这个消息是分段式消息
+	NLM_F_ACK - 请求了 ACK 回复
+	NLM_F_ECHO - 请求回应这个请求消息。
+	NLM_F_ECHO 标志和 NLM_F_ACK 标志类似，它可以和 NLM_F_REQUEST 标志位一起使 用，使得发送者能够收到作为这条请求消息的响应而产生的通知信息，
+	*/
 	__u16		nlmsg_flags;	/* Additional flags */
 	__u32		nlmsg_seq;	/* Sequence number */
 	__u32		nlmsg_pid;	/* Sending process port ID */

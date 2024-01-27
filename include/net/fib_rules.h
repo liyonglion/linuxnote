@@ -16,8 +16,9 @@ struct fib_rule
 	u32			mark; // mark值。例如在iptable中设置 --set-mark 1000。而在ip rule中指定mark 为1000
 	u32			mark_mask; //mark的掩码值
 	u32			pref; //优先级
-	u32			flags; // 标志
+	u32			flags; // 标志。例如用户配置了ip rule not from xxx.xxx.xxx.xxx/24 action table main，这表示取反意思
 	u32			table; //路由表ID
+	// [ table TABLE_ID ] [ protocol PROTO ] [ nat ADDRESS ] [ realms [SRCREALM/]DSTREALM ] [ goto NUMBER ]
 	u8			action; //当前规则动作例如： FR_ACT_GOTO
 	u32			target;//配置goto后，跳转的路由表ID
 	struct fib_rule *	ctarget; //配置goto 后，跳转的那个rule
