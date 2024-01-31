@@ -80,7 +80,7 @@ struct rtable
 	__be32			rt_gateway; //目的地址或者下一跳网关地址
 
 	/* Miscellaneous cached information */
-	__be32			rt_spec_dst; /* RFC1122 specific destination */
+	__be32			rt_spec_dst; /* RFC1122 specific destination 首选源地址选择*/
 	struct inet_peer	*peer; /* long-living peer info 存储ip peer相关的信息*/
 };
 

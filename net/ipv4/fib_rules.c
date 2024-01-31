@@ -100,7 +100,7 @@ static int fib4_rule_action(struct fib_rule *rule, struct flowi *flp,
 	//执行fib_table->tb_lookup()函数，开始查询具体的路由表中的路由
 	err = tbl->tb_lookup(tbl, flp, (struct fib_result *) arg->result);
 	if (err > 0)
-		err = -EAGAIN;
+		err = -EAGAIN;//继续查找下一个路由表
 errout:
 	return err;
 }

@@ -284,6 +284,14 @@ EXPORT_SYMBOL(dst_release);
  *
  * Commented and originally written by Alexey.
  */
+/*
+NETDEV_UNREGISTER
+当设备被注销时，对该设备的所有引用都必须被删除。dst_ifdown将 dsc_entry 结构和相关的 neighbour 实例中到该设备的引用都替换为到回环设备的引用。
+
+NETDEV_DOWN
+因为设备为关闭，所以不再能够向该设备发送流量。因而，dst_entry 中的 input 和 output 函数被分别设置为 dst_discard_in 和 dst_discard_out。
+这两个函数将送来的任何输入 buffer（即它们被要求处理的任意帧）简单丢弃掉。
+*/
 static inline void dst_ifdown(struct dst_entry *dst, struct net_device *dev,
 			      int unregister)
 {

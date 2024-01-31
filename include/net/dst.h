@@ -79,7 +79,7 @@ struct dst_entry
 
 	struct  dst_ops	        *ops;/*dst_ops指针，包括路由缓存的slab缓存块，缓存的垃圾回收函数等*/
 
-	u32			metrics[RTAX_MAX];/*规格向量，主要是被tcp使用*/
+	u32			metrics[RTAX_MAX];/*规格向量，主要是被tcp使用,例如mss、mtu、rtt之类*/
 
 #ifdef CONFIG_NET_CLS_ROUTE
 	__u32			tclassid;

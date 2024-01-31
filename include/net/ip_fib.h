@@ -72,7 +72,11 @@ struct fib_nh {
 	unsigned		nh_flags;//上面注释信息NHFLAGS
 	unsigned char		nh_scope; //范围
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
+	//下一跳的权值。当用户没有明确配置时被设置为默认值 我们将看到，这个值可以使 fib_select_multipath 对每个下一跳的选择机会，
+	//与该下一跳的权值成比例
 	int			nh_weight; //权重
+	//使该下一跳被选中的令牌。这个值是在初始化 fib_info->fip_power 时，首先被初始化为 fib_nh->nh_weight。每次 fib_select_multipath 选中该下一跳时就递减该值，
+	//当该值递减为零时，不再选中该下一跳，直到 nh_power 被重新初始化为 fib_nh->nh_weight（这是在重新初始化 fib_info->fib_power 值时进行的）。
 	int			nh_power; //负载
 #endif
 #ifdef CONFIG_NET_CLS_ROUTE
@@ -95,7 +99,12 @@ struct fib_info {// 具体怎么路由这个数据包的信息
 	int			fib_dead;// 标志路由被删除了
 	unsigned		fib_flags;// 标识位
 	int			fib_protocol;// 安装路由协议
-	__be32			fib_prefsrc;// 指定源IP，源地址和目的地址组成一个路由
+	// 指定首选源IP，源地址和目的地址组成一个路由。
+	// 例如ip route add 10.0.1.0/24 via 10.0.0.1 src 10.0.3.100。在这个例子中，当向 10.0.1.0/24 子网的主机发送封包时，内核将使用 10.0.3.100 作为首选源 IP 地址。
+	//当然，只有本地配置的地址才能生效：这意味着要使前面的命令生效，10.0.3.100 就必须已经在本地某个接口上被配置，不需要一定是在到达 10.0.1.0/24 子网的设备上配置。
+	//（记住在 Linux 中，地址属于主机而不是属于设备。参见第 28 章“多个网络接口的应答”一节）。
+	//当管理员不想使用根据出口设备默认选择的源地址时，管理员通常可以提供一个源地址。
+	__be32			fib_prefsrc;
 	u32			fib_priority;// 路由优先级
 	u32			fib_metrics[RTAX_MAX];// 保存负载值
 #define fib_mtu fib_metrics[RTAX_MTU-1]// MTU值

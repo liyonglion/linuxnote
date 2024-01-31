@@ -916,6 +916,7 @@ int fib_semantic_match(struct list_head *head, const struct flowi *flp,
 		/*2. scope值必须大于匹配的scope值。
 		“报文”（也不知道叫什么好）的scope必须小于路由项的scope，才会往下匹配。因为数值越大，网络的范围越小，也就是“报文”的网络范围必须要小于路由项的网络范围。
 		例如：fa->fa_scope = 0(golbal),flp->fl4_scope = 1,只能fa->fa_scope = 253(link)和fa->fa_scope = 254(link)才能匹配上,该例子见fib_check_nh()函数
+		scope 比搜索关键字中指定的更宽的路由项。
 		*/
 		if (fa->fa_scope < flp->fl4_scope)
 			continue;
@@ -937,7 +938,8 @@ int fib_semantic_match(struct list_head *head, const struct flowi *flp,
 				for_nexthops(fi) {
 					if (nh->nh_flags&RTNH_F_DEAD)//检查是否处于移除状态
 						continue;
-					if (!flp->oif || flp->oif == nh->nh_oif)//判断出接口是否一致，一致说明匹配上
+					//判断出接口是否一致，一致说明匹配上。如果没有flp->oif,则在ip_route_input_slow 或 ip_route_output_slow 函数调用fib_select_multipath来选择出接口
+					if (!flp->oif || flp->oif == nh->nh_oif)
 						break;
 				}
 #ifdef CONFIG_IP_ROUTE_MULTIPATH //支持多路径路由
@@ -959,9 +961,9 @@ int fib_semantic_match(struct list_head *head, const struct flowi *flp,
 				return -EINVAL;
 			}
 		}
-		return err;
+		return err;//出现错误，失败
 	}
-	return 1;
+	return 1;//标识没有匹配的路由，继续查找下一个路由表
 
 out_fill_res:
 	res->prefixlen = prefixlen;
@@ -970,7 +972,7 @@ out_fill_res:
 	res->scope = fa->fa_scope;
 	res->fi = fa->fa_info;
 	atomic_inc(&res->fi->fib_clntref);
-	return 0;
+	return 0;//匹配成功，结果在res中
 }
 
 /* Find appropriate source address to this destination */
@@ -1094,7 +1096,7 @@ int fib_sync_down_addr(struct net *net, __be32 local)
 	}
 	return ret;
 }
-
+//标记所有使用dev设备的下一跳为dead状态
 int fib_sync_down_dev(struct net_device *dev, int force)
 {
 	int ret = 0;

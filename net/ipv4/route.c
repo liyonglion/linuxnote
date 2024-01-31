@@ -117,7 +117,7 @@
 
 #define RT_GC_TIMEOUT (300*HZ)
 
-static int ip_rt_max_size;
+static int ip_rt_max_size;//ip_rt_max_size 是一个硬性限制。一旦达到这个阈值，dst_alloc 函数就会失败，除非 rt_garbage_collect 没法释放部分内存。
 static int ip_rt_gc_timeout __read_mostly	= RT_GC_TIMEOUT;
 static int ip_rt_gc_interval __read_mostly	= 60 * HZ;
 static int ip_rt_gc_min_interval __read_mostly	= HZ / 2;
@@ -153,12 +153,21 @@ static int rt_garbage_collect(struct dst_ops *ops);
 static struct dst_ops ipv4_dst_ops = {
 	.family =		AF_INET,
 	.protocol =		__constant_htons(ETH_P_IP),
+	//负责垃圾回收。当子系统通过 dst_alloc 分配一个新的缓存表项，且该函数发现内存不够时就进行垃圾回收
 	.gc =			rt_garbage_collect,
+	//dst_entry 被标记为 dead 的缓存路由项通常不再被使用，但当使用 IPsec 时该结论并不一定成立。该函数检查一个废弃的 dst_entry 是否还有有用。
 	.check =		ipv4_dst_check,
+	//该函数被 dst_destroy 调用，DST 用 dst_destroy 函数来删除一个 dst_entry 结构，并将删除通知调用协议，以便调用协议先做一些必要的清理工作。
 	.destroy =		ipv4_dst_destroy,
+	//该函数被 dst_ifdown 调用，当一个设备被关闭或注销时，DST 子系统自己会调用 dst_ifdown。对每一个受影响的缓存路由项都要调用该函数一次
 	.ifdown =		ipv4_dst_ifdown,
+	//该函数被 DST 函数 dst_negative_advice 调用，dst_negative_advice 用于向 DST 通知某个 dst_entry 实例出现问题。例如，当 TCP 检测到一次写操作超时，就使用 dst_negative_advice。
+	//IPv4 函数 ipv4_negative_advice 使用该通知来删除缓存路由项。当这个 dst_entry 已经被标记为 dead，ipv4_negative_advice 就释放 rtable 对该 dst_entry 的引用。
 	.negative_advice =	ipv4_negative_advice,
+	//该函数被 DST 函数 dst_link_failure 调用，由于目的地不可到达而出现封包传输问题时，就调用 dst_link_failure。
+	//如果 ARP 要向上层协议通知一个已有的 IPv4 地址不可到达，则对相关的 dst_ertry 结构调用 dst_link_failure
 	.link_failure =		ipv4_link_failure,
+	//更新缓存路由项的 PMTU。通常是在处理所接收到的 ICMP 分片需求消息时调用，
 	.update_pmtu =		ip_rt_update_pmtu,
 	.local_out =		__ip_local_out,
 	.entry_size =		sizeof(struct rtable),
@@ -251,7 +260,7 @@ static inline void rt_hash_lock_init(void)
 #endif
 //路由缓存hash表
 static struct rt_hash_bucket 	*rt_hash_table __read_mostly;
-//路由hash桶的数量
+//路由hash桶的数量，其以 2 为对数的值被保存在 rt_hash_log 中
 static unsigned			rt_hash_mask __read_mostly;
 static unsigned int		rt_hash_log  __read_mostly;
 static atomic_t			rt_genid __read_mostly;//路由随机数
@@ -839,7 +848,11 @@ static int rt_garbage_collect(struct dst_ops *ops)
 	 */
 
 	RT_CACHE_STAT_INC(gc_total);
-
+	/*
+	rt_garbage_collect 函数所做的垃圾回收需要花费大量的 CPU 时间。因此，如果上次调用该函数的时间到现在的间隔小于 ip_rt_gc_min_interval 秒，则不做任何事而立即返回。
+	除非缓存内的表项数目达到最大值 ip_rt_max_size，这时要求立刻执行该函数。
+	ip_rt_max_size 是一个硬性限制。一旦达到这个阈值，dst_alloc 函数就会失败，除非 rt_garbage_collect 没法释放部分内存。
+	*/
 	if (now - last_gc < ip_rt_gc_min_interval &&
 	    atomic_read(&ipv4_dst_ops.entries) < ip_rt_max_size) {
 		RT_CACHE_STAT_INC(gc_ignored);
@@ -1880,7 +1893,7 @@ static int ip_mkroute_input(struct sk_buff *skb,
 
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
 	//多路径选项
-	if (res->fi && res->fi->fib_nhs > 1 && fl->oif == 0)
+	if (res->fi && res->fi->fib_nhs > 1 && fl->oif == 0)//匹配到路由项，但存在多路径且没有指定出接口。注意fl->oif不为空的时候，已经在fib_lookup()中找到路由项
 		fib_select_multipath(fl, res);//优先跳转结构
 #endif
 
@@ -2101,6 +2114,11 @@ martian_source://源地址错误
 	goto e_inval;
 }
 /*
+skb: 触发路由查找的封包。这个封包本身可能不需要被路由。例如，ARP 出于其他原因使用 ip_route_input 来查询本地路由表，这时的 skb 可能是一个入口 ARP 请求。
+daddr: 目标地址
+saddr: 源地址
+tos: IP 包头中的TOS 字段。
+dev: 接收该封包的设备。
 对于输入的数据包，会有三个输出结果:
 1.本机接收
 2.本机转发
@@ -2132,7 +2150,7 @@ int ip_route_input(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 		if (((rth->fl.fl4_dst ^ daddr) |
 		     (rth->fl.fl4_src ^ saddr) |
 		     (rth->fl.iif ^ iif) |
-		     rth->fl.oif |
+		     rth->fl.oif |//因为时入接口，skb还不知道出接口，只能用oif是否为0来判断
 		     (rth->fl.fl4_tos ^ tos)) == 0 &&
 		    rth->fl.mark == skb->mark &&
 		    net_eq(dev_net(rth->u.dst.dev), net) &&
@@ -2168,7 +2186,7 @@ int ip_route_input(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 			if (our
 #ifdef CONFIG_IP_MROUTE
 			    || (!ipv4_is_local_multicast(daddr) &&
-				IN_DEV_MFORWARD(in_dev))
+				IN_DEV_MFORWARD(in_dev))//目的地址不是本地配置的多播地址，但内核支持多播路由
 #endif
 			    ) {
 				rcu_read_unlock();
@@ -2197,6 +2215,11 @@ static int __mkroute_output(struct rtable **result,
 {
 	struct rtable *rth;
 	struct in_device *in_dev;
+	/*
+	RT_FL_TOS(oldflp)用于取出IPTOS_RT_MASK | RTO_ONLINK 标识。这2个标识通过 TOS 变量被传递，但该标识与 IP 包头中的 TOS 字段无关，它只用 TOS 字段的一个无用的位。
+	当该RTO_ONLINK标识被设置时，表示 IP 目的地位于本地子网所以无需路由查找（或者换名话说，路由查找可能失败，但这并不是一个问题）。
+	RTO_ONLINK标识不是管理员在配置路由时所设置，但在路由查找时要使用该标识来指定搜索的路由类型的 scope 必须为 RT_SCOPE_LINK，这表示目的地是直接相连。
+	*/
 	u32 tos = RT_FL_TOS(oldflp);
 	int err = 0;
 	//源地址是回接地址，但是发送设备不支持回接就返回
@@ -2316,7 +2339,7 @@ static int ip_mkroute_output(struct rtable **rp,
 			     unsigned flags)
 {
 	struct rtable *rth = NULL;
-	//创建新的路由表
+	//创建新的缓存路由项
 	int err = __mkroute_output(&rth, res, fl, oldflp, dev_out, flags);
 	unsigned hash;
 	if (err == 0) {
@@ -2330,7 +2353,7 @@ static int ip_mkroute_output(struct rtable **rp,
 /*
  * Major route resolver routine.
  */
-
+//TODO： 注意源地址的选择？
 static int ip_route_output_slow(struct net *net, struct rtable **rp,
 				const struct flowi *oldflp)
 {
@@ -2341,12 +2364,12 @@ static int ip_route_output_slow(struct net *net, struct rtable **rp,
 					.saddr = oldflp->fl4_src, //源地址
 					.proto = oldflp->proto, //协议类型
 					.tos = tos & IPTOS_RT_MASK,
-					.scope = ((tos & RTO_ONLINK) ?
+					.scope = ((tos & RTO_ONLINK) ?//RTO_ONLINK标识与 IP 包头中的 TOS 字段无关，它只用 TOS 字段的一个无用的位
 						  RT_SCOPE_LINK :
-						  RT_SCOPE_UNIVERSE),
+						  RT_SCOPE_UNIVERSE),//在路由查找时RTO_ONLINK该标识来指定搜索的路由类型的 scope 必须为 RT_SCOPE_LINK，这表示目的地是直接相连。
 				      } },
 			    .mark = oldflp->mark,
-			    .iif = net->loopback_dev->ifindex,
+			    .iif = net->loopback_dev->ifindex,//因为调用 ip_route_output_slow 只是为了路由本地产生的流量，所以搜索关键字 fl 中的源设备被初始化为回环设备。
 			    .oif = oldflp->oif };
 	struct fib_result res; //查找的路由项
 	unsigned flags = 0;
@@ -2500,14 +2523,15 @@ static int ip_route_output_slow(struct net *net, struct rtable **rp,
 		flags |= RTCF_LOCAL;
 		goto make_route;
 	}
-
+//多路径实际上可以用于默认路由。ip route命令（需要配置多路径）允许对默认路由项配置多个下一跳.所以对路由项调用 fib_select_multipath 足以完成路由决策。
+//不支持多路径，也就是默认只有一个网关地址或者dev，则使用fib_select_default函数来查询默认路由
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
-	if (res.fi->fib_nhs > 1 && fl.oif == 0)
+	if (res.fi->fib_nhs > 1 && fl.oif == 0)//fl.oif不为0，已经在fib_semantic_match 函数中匹配过下一跳，在这不用重复匹配。
 		fib_select_multipath(&fl, &res);//多路径查询
 	else
 #endif
-	if (!res.prefixlen && res.type == RTN_UNICAST && !fl.oif)//上面路由查询出掩码长度为0，且为单播地址且没有指定发送设备
-		fib_select_default(net, &fl, &res);//查找路由信息
+	if (!res.prefixlen && res.type == RTN_UNICAST && !fl.oif)//res.preifxlen=0表示匹配了默认路由，fib_lookup 总是返同检查的第一个默认路由项。这就是为什么调用 fib_select_default 在多个可用的默认路由项中作出最佳选择。RTN_UNICAST为单播，多播和广播不需要网关
+		fib_select_default(net, &fl, &res);//查找默认路由信息
 
 	if (!fl.fl4_src)
 		fl.fl4_src = FIB_RES_PREFSRC(res);//使用路由中的源地址
@@ -2530,6 +2554,11 @@ make_route:
 		dev_put(dev_out);//递减发送设备引用计数
 out:	return err;
 }
+/*
+net: 网络命名空间
+rp: 当函数返回成功时，*rp 指向与搜索关键字 flp 相匹配的缓存表项。
+flp: 搜索关键字
+*/
 
 int __ip_route_output_key(struct net *net, struct rtable **rp,
 			  const struct flowi *flp)
@@ -3074,7 +3103,7 @@ ctl_table ipv4_route_table[] = {
 #ifdef CONFIG_NET_CLS_ROUTE
 struct ip_rt_acct *ip_rt_acct __read_mostly;
 #endif /* CONFIG_NET_CLS_ROUTE */
-//路由缓存大小
+//用户指定路由缓存大小
 static __initdata unsigned long rhash_entries;
 static int __init set_rhash_entries(char *str)
 {
@@ -3088,7 +3117,7 @@ __setup("rhash_entries=", set_rhash_entries);
 int __init ip_rt_init(void)
 {
 	int rc = 0;
-	//设置路由随机数
+	//设置路由随机数。当每次利用 rt_cache_flush 来剧新路由缓存时，生成一个新的随机值，它保存在 rt_genid 参数重，该参数被用于防止 DoS 攻击，它是路由缓存中元素分布算法的一部分，使元素分布没有确定性。
 	atomic_set(&rt_genid, (int) ((num_physpages ^ (num_physpages>>8)) ^
 			     (jiffies ^ (jiffies >> 7))));
 
@@ -3107,12 +3136,12 @@ int __init ip_rt_init(void)
 	rt_hash_table = (struct rt_hash_bucket *)
 		alloc_large_system_hash("IP route cache",
 					sizeof(struct rt_hash_bucket),
-					rhash_entries,
+					rhash_entries,//用户指定的路由缓存条目大小
 					(num_physpages >= 128 * 1024) ?
 					15 : 17,
 					0,
-					&rt_hash_log,
-					&rt_hash_mask,
+					&rt_hash_log,//路由缓存hash表的log2
+					&rt_hash_mask,//路由缓存hash表的mask
 					0);
 	//初始化路由缓存hash表
 	memset(rt_hash_table, 0, (rt_hash_mask + 1) * sizeof(struct rt_hash_bucket));

@@ -421,7 +421,9 @@ struct in_device *inetdev_by_index(struct net *net, int ifindex)
 }
 
 /* Called only from RTNL semaphored context. No locks. */
-
+/*
+给定一个设备、一个 IP 地址前缀与一个子网掩码，该函数会遍历配置在该入口设备上的所有主 IP 地址，来查找一个与输入的地址前缀和子网掩码相匹配的 IP 地址。查找成功时，它返回匹配的地址。
+*/
 struct in_ifaddr *inet_ifa_byprefix(struct in_device *in_dev, __be32 prefix,
 				    __be32 mask)
 {

@@ -262,7 +262,7 @@ int fib_validate_source(__be32 src, __be32 dst, u8 tos, int oif,
 		goto e_inval;
 
 	net = dev_net(dev);
-	if (fib_lookup(net, &fl, &res))
+	if (fib_lookup(net, &fl, &res))//查找路由表
 		goto last_resort;
 	if (res.type != RTN_UNICAST)
 		goto e_inval_res;
@@ -723,32 +723,32 @@ void fib_add_ifaddr(struct in_ifaddr *ifa)
 	__be32 addr = ifa->ifa_local;
 	__be32 prefix = ifa->ifa_address&mask;//地址&掩码
 
-	if (ifa->ifa_flags&IFA_F_SECONDARY) {
-		prim = inet_ifa_byprefix(in_dev, prefix, mask);
+	if (ifa->ifa_flags&IFA_F_SECONDARY) {//如果该地址是辅助地址，那么就从主地址中查找对应的地址
+		prim = inet_ifa_byprefix(in_dev, prefix, mask);//主地址
 		if (prim == NULL) {
 			printk(KERN_WARNING "fib_add_ifaddr: bug: prim == NULL\n");
 			return;
 		}
 	}
-	//向local路由表中增加路由项
+	//向local路由表中增加路由项.注意掩码为32位，增加如下的路由：local 192.168.3.173 dev eth1 proto kernel scope host src 192.168.3.173
 	fib_magic(RTM_NEWROUTE, RTN_LOCAL, addr, 32, prim);
 
 	if (!(dev->flags&IFF_UP))
 		return;
 
-	/* Add broadcast address, if it is explicitly assigned. */
+	/* 用户手动指定了广播地址，就添加到路由表中。例如：ip addr add 192.168.3.173/24 broadcast 192.168.3.100 dev eth1 */
 	if (ifa->ifa_broadcast && ifa->ifa_broadcast != htonl(0xFFFFFFFF))
-		fib_magic(RTM_NEWROUTE, RTN_BROADCAST, ifa->ifa_broadcast, 32, prim);
-
+		fib_magic(RTM_NEWROUTE, RTN_BROADCAST, ifa->ifa_broadcast, 32, prim);//增加本地广播地址：broadcast 192.168.3.100 dev eth1 proto kernel scope link src 192.168.3.173
+	//当 prefixlen 为 31 时，只有一个二进制位参与地址分配，所以在子网内只有两个地址。如果该位为 0 就表示网络地址，为 1 则表示主机地址（fib_add_ifaddr 函数正在配置的地址）。这种情况下需要到这两个地址的路由，而不需要到导出的广播地址的路由。
 	if (!ipv4_is_zeronet(prefix) && !(ifa->ifa_flags&IFA_F_SECONDARY) &&
 	    (prefix != addr || ifa->ifa_prefixlen < 32)) {
 		fib_magic(RTM_NEWROUTE, dev->flags&IFF_LOOPBACK ? RTN_LOCAL :
-			  RTN_UNICAST, prefix, ifa->ifa_prefixlen, prim);
-
+			  RTN_UNICAST, prefix, ifa->ifa_prefixlen, prim);//向main路由表中添加到网络地址的路由项。192.168.3.0/24 dev eth1 proto kernel scope link
+		//当 prefixlen 小于 31 时，子网内包含的地址数大于或等于四个，但本地地址、网络地址和广播地址只占用其中三个。此时内核就添加到导出的广播地址的路由和到网络地址的路由。
 		/* Add network specific broadcasts, when it takes a sense */
 		if (ifa->ifa_prefixlen < 31) {
-			fib_magic(RTM_NEWROUTE, RTN_BROADCAST, prefix, 32, prim);
-			fib_magic(RTM_NEWROUTE, RTN_BROADCAST, prefix|~mask, 32, prim);
+			fib_magic(RTM_NEWROUTE, RTN_BROADCAST, prefix, 32, prim);//增加受限的广播地址到本地路由。broadcast 192.168.3.0 dev eth1 proto kernel scope link src 192.168.3.173
+			fib_magic(RTM_NEWROUTE, RTN_BROADCAST, prefix|~mask, 32, prim);//添加广播地址到本地路由。broadcast 192.168.3.255 dev eth1 proto kernel scope link src 192.168.3.173
 		}
 	}
 }
@@ -902,9 +902,9 @@ static void nl_fib_lookup_exit(struct net *net)
 
 static void fib_disable_ip(struct net_device *dev, int force)
 {
-	if (fib_sync_down_dev(dev, force))
-		fib_flush(dev_net(dev));
-	rt_cache_flush(0);
+	if (fib_sync_down_dev(dev, force))//删除所有使用dev的nexthop
+		fib_flush(dev_net(dev));//删除路由项中标记为RTNH_F_DEAD的路由项
+	rt_cache_flush(0);//立即刷新缓存
 	arp_ifdown(dev);
 }
 
@@ -939,7 +939,7 @@ static int fib_netdev_event(struct notifier_block *this, unsigned long event, vo
 {
 	struct net_device *dev = ptr;
 	struct in_device *in_dev = __in_dev_get_rtnl(dev);
-
+	//当设备被关闭时到 IP 地址的路由没有被删除，这是因为它的耳地址属于主机而不是属于接口。只要与该地址相关联的设备存在，那么该地址就一直存在，所以fib_disable_ip()中的fore是不同的;
 	if (event == NETDEV_UNREGISTER) {
 		fib_disable_ip(dev, 2);
 		return NOTIFY_DONE;
