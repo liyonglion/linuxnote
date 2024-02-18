@@ -1467,7 +1467,7 @@ static int __init inet_init(void)
 	 *	Set the ARP module up
 	 */
 
-	arp_init();
+	arp_init();//初始化邻居子系统
 
 	/*
 	 *	Set the IP module up

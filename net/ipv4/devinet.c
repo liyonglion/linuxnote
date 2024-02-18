@@ -168,7 +168,7 @@ static struct in_device *inetdev_init(struct net_device *dev)
 			sizeof(in_dev->cnf));
 	in_dev->cnf.sysctl = NULL;
 	in_dev->dev = dev;
-	if ((in_dev->arp_parms = neigh_parms_alloc(dev, &arp_tbl)) == NULL)
+	if ((in_dev->arp_parms = neigh_parms_alloc(dev, &arp_tbl)) == NULL)//创建struct neigh_parms 对象，并复制arp_tbl.parms参数
 		goto out_kfree;
 	/* Reference in_dev->dev */
 	dev_hold(dev);

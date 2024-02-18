@@ -131,11 +131,11 @@ struct arpreq_old {
 
 struct arphdr
 {
-	__be16		ar_hrd;		/* format of hardware address	*/
-	__be16		ar_pro;		/* format of protocol address	*/
-	unsigned char	ar_hln;		/* length of hardware address	*/
-	unsigned char	ar_pln;		/* length of protocol address	*/
-	__be16		ar_op;		/* ARP opcode (command)		*/
+	__be16		ar_hrd;		/* format of hardware address	硬件类型*/
+	__be16		ar_pro;		/* format of protocol address	上层协议类型*/
+	unsigned char	ar_hln;		/* length of hardware address mac地址长度	*/
+	unsigned char	ar_pln;		/* length of protocol address	ip地址长度*/
+	__be16		ar_op;		/* ARP opcode (command)	操作码	*/
 
 #if 0
 	 /*

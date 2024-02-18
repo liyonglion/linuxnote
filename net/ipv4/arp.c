@@ -172,8 +172,8 @@ struct neigh_ops arp_broken_ops = {
 
 struct neigh_table arp_tbl = {
 	.family =	AF_INET,
-	.entry_size =	sizeof(struct neighbour) + 4,
-	.key_len =	4,
+	.entry_size =	sizeof(struct neighbour) + 4,// +4 是后面跟了一个IP地址
+	.key_len =	4,//IP地址的长度
 	.hash =		arp_hash,
 	.constructor =	arp_constructor,
 	.proxy_redo =	parp_redo,
@@ -198,7 +198,7 @@ struct neigh_table arp_tbl = {
 	.gc_thresh2 =	512,
 	.gc_thresh3 =	1024,
 };
-
+//addr是IP地址
 int arp_mc_map(__be32 addr, u8 *haddr, struct net_device *dev, int dir)
 {
 	switch (dev->type) {
@@ -230,29 +230,29 @@ static u32 arp_hash(const void *pkey, const struct net_device *dev)
 
 static int arp_constructor(struct neighbour *neigh)
 {
-	__be32 addr = *(__be32*)neigh->primary_key;
-	struct net_device *dev = neigh->dev;
+	__be32 addr = *(__be32*)neigh->primary_key;//获取IP地址
+	struct net_device *dev = neigh->dev;//获取网络设备
 	struct in_device *in_dev;
 	struct neigh_parms *parms;
 
 	rcu_read_lock();
-	in_dev = __in_dev_get_rcu(dev);
+	in_dev = __in_dev_get_rcu(dev);//获取设备的配置结构
 	if (in_dev == NULL) {
 		rcu_read_unlock();
 		return -EINVAL;
 	}
 
-	neigh->type = inet_addr_type(dev_net(dev), addr);
+	neigh->type = inet_addr_type(dev_net(dev), addr);//记录地址类型 RTN_BROADCAST、RTN_LOCAL、RTN_BROADCAST、RTN_UNICAST
 
-	parms = in_dev->arp_parms;
-	__neigh_parms_put(neigh->parms);
-	neigh->parms = neigh_parms_clone(parms);
+	parms = in_dev->arp_parms;//获取配置结构的的邻居参数
+	__neigh_parms_put(neigh->parms);//递减原来邻居参数的使用计数
+	neigh->parms = neigh_parms_clone(parms);//记录配置结构的邻居参数
 	rcu_read_unlock();
-
-	if (!dev->header_ops) {
-		neigh->nud_state = NUD_NOARP;
-		neigh->ops = &arp_direct_ops;
-		neigh->output = neigh->ops->queue_xmit;
+	//对于eth，header_ops是eth_header_ops。也就是说不会走到这个位置，而是else分支
+	if (!dev->header_ops) {//是否安装了链路层函数表，由驱动安装
+		neigh->nud_state = NUD_NOARP;//不需要解析状态
+		neigh->ops = &arp_direct_ops;//记录函数表，直接将包发送给底层
+		neigh->output = neigh->ops->queue_xmit;//设置发送函数：dev_queue_xmit
 	} else {
 		/* Good devices (checked by reading texts, but only Ethernet is
 		   tested)
@@ -281,7 +281,7 @@ static int arp_constructor(struct neighbour *neigh)
 		   (a lot of redundant clones/copies, useless in 2.1),
 		   I wonder why people believe that they work.
 		 */
-		switch (dev->type) {
+		switch (dev->type) {//判断网络设备类型
 		default:
 			break;
 		case ARPHRD_ROSE:
@@ -290,32 +290,33 @@ static int arp_constructor(struct neighbour *neigh)
 #if defined(CONFIG_NETROM) || defined(CONFIG_NETROM_MODULE)
 		case ARPHRD_NETROM:
 #endif
-			neigh->ops = &arp_broken_ops;
-			neigh->output = neigh->ops->output;
+			neigh->ops = &arp_broken_ops;//记录函数表
+			neigh->output = neigh->ops->output;//设置发送函数
 			return 0;
 #endif
 		;}
 #endif
-		if (neigh->type == RTN_MULTICAST) {
+		//组播、环回、点对点、广播的都不需要ARP
+		if (neigh->type == RTN_MULTICAST) {//组播状态
 			neigh->nud_state = NUD_NOARP;
-			arp_mc_map(addr, neigh->ha, dev, 1);
-		} else if (dev->flags&(IFF_NOARP|IFF_LOOPBACK)) {
+			arp_mc_map(addr, neigh->ha, dev, 1);//设置mac地址。组播mac地址有些特殊，这里把IP地址写入mac地址中
+		} else if (dev->flags&(IFF_NOARP|IFF_LOOPBACK)) {//回环设备
 			neigh->nud_state = NUD_NOARP;
-			memcpy(neigh->ha, dev->dev_addr, dev->addr_len);
-		} else if (neigh->type == RTN_BROADCAST || dev->flags&IFF_POINTOPOINT) {
+			memcpy(neigh->ha, dev->dev_addr, dev->addr_len);//直接将设备的地址作为邻居结构的MAC地址
+		} else if (neigh->type == RTN_BROADCAST || dev->flags&IFF_POINTOPOINT) {//广播或者点对点设备
 			neigh->nud_state = NUD_NOARP;
-			memcpy(neigh->ha, dev->broadcast, dev->addr_len);
+			memcpy(neigh->ha, dev->broadcast, dev->addr_len);//复制广播地址。ether1394设备会在初始化的时候将dev->broadcast设置为全0xff
 		}
-
-		if (dev->header_ops->cache)
-			neigh->ops = &arp_hh_ops;
+		//设置函数表，不是arp_hh_ops就是arp_generic_ops.对于eth设备，cache函数是eth_header_cache
+		if (dev->header_ops->cache)//cache函数将以太头缓存到邻居结构的hh中，数据包发送前，直接拷贝缓存的以太头即可，无需重新组装
+			neigh->ops = &arp_hh_ops;//记录函数表。eth会走到这位置
 		else
 			neigh->ops = &arp_generic_ops;
 
-		if (neigh->nud_state&NUD_VALID)
-			neigh->output = neigh->ops->connected_output;
+		if (neigh->nud_state&NUD_VALID)//无效状态
+			neigh->output = neigh->ops->connected_output;//设置发送状态
 		else
-			neigh->output = neigh->ops->output;
+			neigh->output = neigh->ops->output;//使用函数表的发送函数
 	}
 	return 0;
 }
@@ -387,19 +388,20 @@ static int arp_ignore(struct in_device *in_dev, __be32 sip, __be32 tip)
 	int scope;
 
 	switch (IN_DEV_ARP_IGNORE(in_dev)) {
-	case 0:	/* Reply, the tip is already validated */
+	case 0:	/* 响应任意网卡上接收到的对本机IP地址的arp请求（包括环回网卡上的地址），而不管该目的IP是否在接收网卡上，目的IP有可能在其他网卡上。 */
 		return 0;
-	case 1:	/* Reply only if tip is configured on the incoming interface */
+	case 1:	/* Reply only if tip is configured on the incoming interface只响应目的IP地址为接收网卡上的本地地址的arp请求。 */
 		sip = 0;
 		scope = RT_SCOPE_HOST;
 		break;
 	case 2:	/*
 		 * Reply only if tip is configured on the incoming interface
 		 * and is in same subnet as sip
+		 * 只响应目的IP地址为接收网卡上的本地地址的arp请求，并且arp请求的源IP必须和接收网卡同网段。
 		 */
 		scope = RT_SCOPE_HOST;
 		break;
-	case 3:	/* Do not reply for scope host addresses */
+	case 3:	/* Do not reply for scope host addresses 如果ARP请求数据包所请求的IP地址对应的本地地址其作用域（scope）为主机（host），则不回应ARP响应数据包，如果作用域为全局（global）或链路（link），则回应ARP响应数据包*/
 		sip = 0;
 		scope = RT_SCOPE_LINK;
 		break;
@@ -408,7 +410,7 @@ static int arp_ignore(struct in_device *in_dev, __be32 sip, __be32 tip)
 	case 6:
 	case 7:
 		return 0;
-	case 8:	/* Do not reply */
+	case 8:	/* Do not reply不回应所有的arp请求 */
 		return 1;
 	default:
 		return 0;
@@ -595,23 +597,25 @@ struct sk_buff *arp_create(int type, int ptype, __be32 dest_ip,
 	/*
 	 *	Allocate a buffer
 	 */
-
+	//分配数据包结构空间,分配缓冲块，其长度包含 ARP 头部长度和以太网头部长度
 	skb = alloc_skb(arp_hdr_len(dev) + LL_ALLOCATED_SPACE(dev), GFP_ATOMIC);
 	if (skb == NULL)
 		return NULL;
-
+	//预留以太网头部
 	skb_reserve(skb, LL_RESERVED_SPACE(dev));
+	//设置网络层头部指针
 	skb_reset_network_header(skb);
-	arp = (struct arphdr *) skb_put(skb, arp_hdr_len(dev));
-	skb->dev = dev;
-	skb->protocol = htons(ETH_P_ARP);
-	if (src_hw == NULL)
-		src_hw = dev->dev_addr;
-	if (dest_hw == NULL)
-		dest_hw = dev->broadcast;
+	arp = (struct arphdr *) skb_put(skb, arp_hdr_len(dev));//指向数据块中的ARP头部
+	skb->dev = dev;//记录设备
+	skb->protocol = htons(ETH_P_ARP);//记录协议类型
+	if (src_hw == NULL)//没有指定源硬件地址
+		src_hw = dev->dev_addr;//使用设备的源硬件地址
+	if (dest_hw == NULL)//没有指定目的硬件地址
+		dest_hw = dev->broadcast;//使用设备的广播地址，即全0xff，dev初始化的时候会设置为全ff
 
 	/*
 	 *	Fill the device header for the ARP frame
+	 填充eth头中的mac地址信息，调用eth_header_ops结构中的create()函数
 	 */
 	if (dev_hard_header(skb, dev, ptype, dest_hw, src_hw, skb->len) < 0)
 		goto out;
@@ -628,8 +632,8 @@ struct sk_buff *arp_create(int type, int ptype, __be32 dest_ip,
 	 */
 	switch (dev->type) {
 	default:
-		arp->ar_hrd = htons(dev->type);
-		arp->ar_pro = htons(ETH_P_IP);
+		arp->ar_hrd = htons(dev->type);//记录硬件类型
+		arp->ar_pro = htons(ETH_P_IP);//记录协议类型
 		break;
 
 #if defined(CONFIG_AX25) || defined(CONFIG_AX25_MODULE)
@@ -660,22 +664,22 @@ struct sk_buff *arp_create(int type, int ptype, __be32 dest_ip,
 #endif
 	}
 
-	arp->ar_hln = dev->addr_len;
-	arp->ar_pln = 4;
-	arp->ar_op = htons(type);
+	arp->ar_hln = dev->addr_len;//记录设备物理地址长度
+	arp->ar_pln = 4;//设备IP地址长度
+	arp->ar_op = htons(type);//记录操作类型
 
-	arp_ptr=(unsigned char *)(arp+1);
+	arp_ptr=(unsigned char *)(arp+1);//数据块中用于保存源mac地址处
 
-	memcpy(arp_ptr, src_hw, dev->addr_len);
-	arp_ptr+=dev->addr_len;
-	memcpy(arp_ptr, &src_ip,4);
-	arp_ptr+=4;
+	memcpy(arp_ptr, src_hw, dev->addr_len);//复制源mac地址
+	arp_ptr+=dev->addr_len;//偏移到保存源IP地址处
+	memcpy(arp_ptr, &src_ip,4);//复制源ip地址
+	arp_ptr+=4;//偏移到目标mac地址处
 	if (target_hw != NULL)
-		memcpy(arp_ptr, target_hw, dev->addr_len);
+		memcpy(arp_ptr, target_hw, dev->addr_len);//复制目标mac地址
 	else
-		memset(arp_ptr, 0, dev->addr_len);
-	arp_ptr+=dev->addr_len;
-	memcpy(arp_ptr, &dest_ip, 4);
+		memset(arp_ptr, 0, dev->addr_len);//复制全0,再ARP request报文中，目的MAC地址需要为全0。
+	arp_ptr+=dev->addr_len;//偏移到保存目的IP地址处
+	memcpy(arp_ptr, &dest_ip, 4);//复制目的ip地址
 
 	return skb;
 
@@ -716,7 +720,7 @@ void arp_send(int type, int ptype, __be32 dest_ip,
 		return;
 	}
 
-	arp_xmit(skb);
+	arp_xmit(skb);//发送arp reply报文
 }
 
 /*
@@ -725,14 +729,14 @@ void arp_send(int type, int ptype, __be32 dest_ip,
 
 static int arp_process(struct sk_buff *skb)
 {
-	struct net_device *dev = skb->dev;
-	struct in_device *in_dev = in_dev_get(dev);
+	struct net_device *dev = skb->dev;//报文入设备
+	struct in_device *in_dev = in_dev_get(dev);//设备地址信息
 	struct arphdr *arp;
 	unsigned char *arp_ptr;
-	struct rtable *rt;
+	struct rtable *rt;//缓存路由
 	unsigned char *sha;
 	__be32 sip, tip;
-	u16 dev_type = dev->type;
+	u16 dev_type = dev->type;//设备类型
 	int addr_type;
 	struct neighbour *n;
 	struct net *net = dev_net(dev);
@@ -744,7 +748,7 @@ static int arp_process(struct sk_buff *skb)
 	if (in_dev == NULL)
 		goto out;
 
-	arp = arp_hdr(skb);
+	arp = arp_hdr(skb);//获取arp报文头
 
 	switch (dev_type) {
 	default:
@@ -782,7 +786,7 @@ static int arp_process(struct sk_buff *skb)
 		break;
 	}
 
-	/* Understand only these message types */
+	/* Understand only these message types 只处理arp reply和request*/
 
 	if (arp->ar_op != htons(ARPOP_REPLY) &&
 	    arp->ar_op != htons(ARPOP_REQUEST))
@@ -791,16 +795,16 @@ static int arp_process(struct sk_buff *skb)
 /*
  *	Extract fields
  */
-	arp_ptr= (unsigned char *)(arp+1);
-	sha	= arp_ptr;
-	arp_ptr += dev->addr_len;
-	memcpy(&sip, arp_ptr, 4);
-	arp_ptr += 4;
-	arp_ptr += dev->addr_len;
-	memcpy(&tip, arp_ptr, 4);
+	arp_ptr= (unsigned char *)(arp+1);//指向数据块中的源 MAC 地址处
+	sha	= arp_ptr;//客户端mac地址
+	arp_ptr += dev->addr_len;//偏移到源IP位置
+	memcpy(&sip, arp_ptr, 4);//拷贝源IP地址
+	arp_ptr += 4;//跳过源IP，指向目的MAC地址处
+	arp_ptr += dev->addr_len;//跳过目的mac地址，指向目的IP地址处
+	memcpy(&tip, arp_ptr, 4);//拷贝目的IP地址
 /*
  *	Check for bad requests for 127.x.x.x and requests for multicast
- *	addresses.  If this is one such, delete it.
+ *	addresses.  If this is one such, delete it.回文和组播地址不处理
  */
 	if (ipv4_is_loopback(tip) || ipv4_is_multicast(tip))
 		goto out;
@@ -837,29 +841,30 @@ static int arp_process(struct sk_buff *skb)
 				 dev->dev_addr, sha);
 		goto out;
 	}
-
+	//ARP请求报文，请求报文必知道源IP和目标IP，目标MAC未知。此时的skb->rtable一定为空，ip_route_input()查询local路由表，查询local路由表是为了确认sip是否本地IP，例如主机有2张网卡，接在同一个交换机上。从交换机上另外一台主机上发送arp报文到请求网卡1的MAC，此时网卡2也会收到。
+	//将构造缓存路由项并赋值到skb->rtable中。
 	if (arp->ar_op == htons(ARPOP_REQUEST) &&
 	    ip_route_input(skb, tip, sip, 0, dev) == 0) {
 
-		rt = skb->rtable;
-		addr_type = rt->rt_type;
+		rt = skb->rtable;//缓存路由项
+		addr_type = rt->rt_type;//路由类型
 
-		if (addr_type == RTN_LOCAL) {
+		if (addr_type == RTN_LOCAL) {//sip和tip都是本地地址
 			n = neigh_event_ns(&arp_tbl, sha, &sip, dev);
 			if (n) {
 				int dont_send = 0;
 
 				if (!dont_send)
-					dont_send |= arp_ignore(in_dev,sip,tip);
-				if (!dont_send && IN_DEV_ARPFILTER(in_dev))
+					dont_send |= arp_ignore(in_dev,sip,tip);//查看/proc/sys/net/conf/all/arp_ignore
+				if (!dont_send && IN_DEV_ARPFILTER(in_dev))//查看/proc/sys/net/conf/all/arp_filter
 					dont_send |= arp_filter(sip,tip,dev);
-				if (!dont_send)
+				if (!dont_send)//发送arp reply
 					arp_send(ARPOP_REPLY,ETH_P_ARP,sip,dev,tip,sha,dev->dev_addr,sha);
 
 				neigh_release(n);
 			}
 			goto out;
-		} else if (IN_DEV_FORWARD(in_dev)) {
+		} else if (IN_DEV_FORWARD(in_dev)) {//是否开启转发
 			    if (addr_type == RTN_UNICAST  && rt->u.dst.dev != dev &&
 			     (arp_fwd_proxy(in_dev, rt) || pneigh_lookup(&arp_tbl, net, &tip, dev, 0))) {
 				n = neigh_event_ns(&arp_tbl, sha, &sip, dev);
@@ -867,7 +872,7 @@ static int arp_process(struct sk_buff *skb)
 					neigh_release(n);
 
 				if (NEIGH_CB(skb)->flags & LOCALLY_ENQUEUED ||
-				    skb->pkt_type == PACKET_HOST ||
+				    skb->pkt_type == PACKET_HOST || //目的地是本机的arp request报文
 				    in_dev->arp_parms->proxy_delay == 0) {
 					arp_send(ARPOP_REPLY,ETH_P_ARP,sip,dev,tip,sha,dev->dev_addr,sha);
 				} else {
@@ -880,7 +885,7 @@ static int arp_process(struct sk_buff *skb)
 		}
 	}
 
-	/* Update our ARP tables */
+	/* Update our ARP tables 更新本地的arp表，没有就新建一个 neighbour*/
 
 	n = __neigh_lookup(&arp_tbl, &sip, dev, 0);
 
@@ -909,10 +914,10 @@ static int arp_process(struct sk_buff *skb)
 		/* Broadcast replies and request packets
 		   do not assert neighbour reachability.
 		 */
-		if (arp->ar_op != htons(ARPOP_REPLY) ||
-		    skb->pkt_type != PACKET_HOST)
-			state = NUD_STALE;
-		neigh_update(n, sha, state, override ? NEIGH_UPDATE_F_OVERRIDE : 0);
+		if (arp->ar_op != htons(ARPOP_REPLY) ||//如果ARP包不是应答类型
+		    skb->pkt_type != PACKET_HOST)//数据包不属于本地类型
+			state = NUD_STALE;//设置为过期状态
+		neigh_update(n, sha, state, override ? NEIGH_UPDATE_F_OVERRIDE : 0);//更新状态为NUD_REACHABLE
 		neigh_release(n);
 	}
 
@@ -932,29 +937,30 @@ static void parp_redo(struct sk_buff *skb)
 /*
  *	Receive an arp request from the device layer.
  */
-
+//L2收到报文后，会判断MAC头中的TYPE字段来判断属于那种协议，然后调用对应的处理函数。arp_rcv就处理ARP 报文
 static int arp_rcv(struct sk_buff *skb, struct net_device *dev,
 		   struct packet_type *pt, struct net_device *orig_dev)
 {
-	struct arphdr *arp;
+	struct arphdr *arp;//arp头
 
 	/* ARP header, plus 2 device addresses, plus 2 IP addresses.  */
-	if (!pskb_may_pull(skb, arp_hdr_len(dev)))
+	if (!pskb_may_pull(skb, arp_hdr_len(dev)))//判断ARP是否有效
 		goto freeskb;
 
-	arp = arp_hdr(skb);
-	if (arp->ar_hln != dev->addr_len ||
-	    dev->flags & IFF_NOARP ||
-	    skb->pkt_type == PACKET_OTHERHOST ||
-	    skb->pkt_type == PACKET_LOOPBACK ||
+	arp = arp_hdr(skb);//获取ARP头
+	if (arp->ar_hln != dev->addr_len || //设备地址长度是否一样
+	    dev->flags & IFF_NOARP || //设备是否支持ARP协议
+	    skb->pkt_type == PACKET_OTHERHOST || //是否发给其他主机的数据包
+	    skb->pkt_type == PACKET_BROADCAST || //广播包
+	    skb->pkt_type == PACKET_LOOPBACK || //回环包
 	    arp->ar_pln != 4)
 		goto freeskb;
-
+	//检查能否共享数据包结构,如果能够共享的话就会通过 skb_clone()克隆一个新的数据包结构包，函数使用这个新的数据包结构
 	if ((skb = skb_share_check(skb, GFP_ATOMIC)) == NULL)
 		goto out_of_mem;
-
+	//设置控制块的时候必须先skb_clone(skb_share_check会执行skb_clone操作)一个skb，然后在skb_clone的skb上设置控制块
 	memset(NEIGH_CB(skb), 0, sizeof(struct neighbour_cb));
-
+	//netFilter处理，最终调用arp_process
 	return NF_HOOK(NF_ARP, NF_ARP_IN, skb, dev, NULL, arp_process);
 
 freeskb:
@@ -1261,15 +1267,15 @@ static int arp_proc_init(void);
 
 void __init arp_init(void)
 {
-	neigh_table_init(&arp_tbl);
+	neigh_table_init(&arp_tbl);//将arp表插入到全局的 neigh_tables中
 
-	dev_add_pack(&arp_packet_type);
-	arp_proc_init();
+	dev_add_pack(&arp_packet_type);//将arp协议添加到协议栈中，当收到数据包，分析是arp报文，就会调用arp_packet_type->func->arp_rcv()
+	arp_proc_init();//初始化arp proc文件相关
 #ifdef CONFIG_SYSCTL
 	neigh_sysctl_register(NULL, &arp_tbl.parms, NET_IPV4,
-			      NET_IPV4_NEIGH, "ipv4", NULL, NULL);
+			      NET_IPV4_NEIGH, "ipv4", NULL, NULL);//arp表的sysctl文件，通过sysctl可以查看修改arp_tbl.parms参数。sysctl -N net.ipv4.neigh
 #endif
-	register_netdevice_notifier(&arp_netdev_notifier);
+	register_netdevice_notifier(&arp_netdev_notifier);//注册arp_netdev_notifier，当net_device发生改变时，就会调用arp_netdev_event()
 }
 
 #ifdef CONFIG_PROC_FS
@@ -1405,7 +1411,7 @@ static const struct file_operations arp_seq_fops = {
 
 static int __net_init arp_net_init(struct net *net)
 {
-	if (!proc_net_fops_create(net, "arp", S_IRUGO, &arp_seq_fops))
+	if (!proc_net_fops_create(net, "arp", S_IRUGO, &arp_seq_fops))//在/proc/{net}/arp/下创建arp文件
 		return -ENOMEM;
 	return 0;
 }

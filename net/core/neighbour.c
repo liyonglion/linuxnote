@@ -59,7 +59,7 @@ static void neigh_timer_handler(unsigned long arg);
 static void __neigh_notify(struct neighbour *n, int type, int flags);
 static void neigh_update_notify(struct neighbour *neigh);
 static int pneigh_ifdown(struct neigh_table *tbl, struct net_device *dev);
-
+//邻居表链表：可能会有多个邻居表，例如arp 、dn、nd。对于ARP的是 arp_tbl
 static struct neigh_table *neigh_tables;
 #ifdef CONFIG_PROC_FS
 static const struct file_operations neigh_stat_seq_fops;
@@ -131,26 +131,28 @@ static int neigh_forced_gc(struct neigh_table *tbl)
 	int shrunk = 0;
 	int i;
 
-	NEIGH_CACHE_STAT_INC(tbl, forced_gc_runs);
+	NEIGH_CACHE_STAT_INC(tbl, forced_gc_runs);//强制GC统计计数自增1。tbl->stats->forced_gc_runs++
 
 	write_lock_bh(&tbl->lock);
+	//遍历所有的hash bucket
 	for (i = 0; i <= tbl->hash_mask; i++) {
 		struct neighbour *n, **np;
 
 		np = &tbl->hash_buckets[i];
+		//遍历邻居相链表
 		while ((n = *np) != NULL) {
 			/* Neighbour record may be discarded if:
 			 * - nobody refers to it.
 			 * - it is not permanent
 			 */
 			write_lock(&n->lock);
-			if (atomic_read(&n->refcnt) == 1 &&
-			    !(n->nud_state & NUD_PERMANENT)) {
+			if (atomic_read(&n->refcnt) == 1 &&//邻居项引用计数为1
+			    !(n->nud_state & NUD_PERMANENT)) {//非静态邻居项
 				*np	= n->next;
-				n->dead = 1;
+				n->dead = 1;//标记为死亡
 				shrunk	= 1;
 				write_unlock(&n->lock);
-				neigh_cleanup_and_release(n);
+				neigh_cleanup_and_release(n);//清理操作
 				continue;
 			}
 			write_unlock(&n->lock);
@@ -168,7 +170,7 @@ static int neigh_forced_gc(struct neigh_table *tbl)
 static void neigh_add_timer(struct neighbour *n, unsigned long when)
 {
 	neigh_hold(n);
-	if (unlikely(mod_timer(&n->timer, when))) {
+	if (unlikely(mod_timer(&n->timer, when))) {//链入定时队列
 		printk("NEIGH: BUG, double timer add, state is %x\n",
 		       n->nud_state);
 		dump_stack();
@@ -262,32 +264,33 @@ static struct neighbour *neigh_alloc(struct neigh_table *tbl)
 	struct neighbour *n = NULL;
 	unsigned long now = jiffies;
 	int entries;
-
-	entries = atomic_inc_return(&tbl->entries) - 1;
-	if (entries >= tbl->gc_thresh3 ||
-	    (entries >= tbl->gc_thresh2 &&
+	//arp_tbl中的gc_thresh1、gc_thresh2、gc_thresh3 分别为128 512 1024
+	entries = atomic_inc_return(&tbl->entries) - 1;//获取当前的neighbour数量，注意 atomic_inc_return(&tbl->entries)会将tbl->entries加1
+	if (entries >= tbl->gc_thresh3 ||//当前neighbour数量大于最大回收阈值
+	    (entries >= tbl->gc_thresh2 && //当前neighbour数量大于中等回收阈值 && 最后一次回收在5HZ之外
 	     time_after(now, tbl->last_flush + 5 * HZ))) {
-		if (!neigh_forced_gc(tbl) &&
-		    entries >= tbl->gc_thresh3)
+		if (!neigh_forced_gc(tbl) &&//开启强制回收邻居结构
+		    entries >= tbl->gc_thresh3)//回收后任然大于最大回收阈值
 			goto out_entries;
 	}
-
+	//在邻居表指定的高速缓存中分配结构空间
 	n = kmem_cache_zalloc(tbl->kmem_cachep, GFP_ATOMIC);
 	if (!n)
 		goto out_entries;
 
-	skb_queue_head_init(&n->arp_queue);
+	skb_queue_head_init(&n->arp_queue);//初始化邻居结构体队列头
 	rwlock_init(&n->lock);
-	n->updated	  = n->used = now;
-	n->nud_state	  = NUD_NONE;
-	n->output	  = neigh_blackhole;
-	n->parms	  = neigh_parms_clone(&tbl->parms);
-	setup_timer(&n->timer, neigh_timer_handler, (unsigned long)n);
+	n->updated	  = n->used = now;//记录当前时间
+	n->nud_state	  = NUD_NONE;//设置初始状态
+	n->output	  = neigh_blackhole;//设置输出函数
+	n->parms	  = neigh_parms_clone(&tbl->parms);//记录邻居参数结构
+	//注意：这里仅仅只是初始化了定时器，并没有将他链入内核的定时器执行队列，在__neigh_event_send函数的过程中看到这个定时器启动。定时重传arp报文
+	setup_timer(&n->timer, neigh_timer_handler, (unsigned long)n);//初始化定时器函数，定时函数为neigh_timer_handler
 
 	NEIGH_CACHE_STAT_INC(tbl, allocs);
-	n->tbl		  = tbl;
-	atomic_set(&n->refcnt, 1);
-	n->dead		  = 1;
+	n->tbl		  = tbl;//记录邻居表
+	atomic_set(&n->refcnt, 1);//设置使用计数
+	n->dead		  = 1;//初始删除标志
 out:
 	return n;
 
@@ -360,22 +363,23 @@ struct neighbour *neigh_lookup(struct neigh_table *tbl, const void *pkey,
 			       struct net_device *dev)
 {
 	struct neighbour *n;
-	int key_len = tbl->key_len;
+	int key_len = tbl->key_len;//获取地址长度，arp为4，保存的是IP地址
 	u32 hash_val;
 
-	NEIGH_CACHE_STAT_INC(tbl, lookups);
+	NEIGH_CACHE_STAT_INC(tbl, lookups);//递增tbl->stats->lookups++
 
 	read_lock_bh(&tbl->lock);
-	hash_val = tbl->hash(pkey, dev);
+	hash_val = tbl->hash(pkey, dev);//计算IP地址的hash值
+	//遍历对于的hash桶，找到指定设备、地址相同的邻居结构
 	for (n = tbl->hash_buckets[hash_val & tbl->hash_mask]; n; n = n->next) {
 		if (dev == n->dev && !memcmp(n->primary_key, pkey, key_len)) {
-			neigh_hold(n);
-			NEIGH_CACHE_STAT_INC(tbl, hits);
+			neigh_hold(n);//递增邻居结构的计数器
+			NEIGH_CACHE_STAT_INC(tbl, hits);//递增邻居表中的命中计数器。tbl->stats->hits++
 			break;
 		}
 	}
 	read_unlock_bh(&tbl->lock);
-	return n;
+	return n;//返回找到的邻居结构
 }
 EXPORT_SYMBOL(neigh_lookup);
 
@@ -402,66 +406,66 @@ struct neighbour *neigh_lookup_nodev(struct neigh_table *tbl, struct net *net,
 	return n;
 }
 EXPORT_SYMBOL(neigh_lookup_nodev);
-
+//当发送数据包的时候，发现没有邻居结构(没有学习到对应的MAC地址)，就创建一个邻居结构，然后执行constructor()(arp_constructor函数，这个函数会发送arp请求)
 struct neighbour *neigh_create(struct neigh_table *tbl, const void *pkey,
 			       struct net_device *dev)
 {
 	u32 hash_val;
-	int key_len = tbl->key_len;
+	int key_len = tbl->key_len;//在struct neighbour 尾部的key长度，这个位置存在的是IP地址，arp_tbl.key_len 为4
 	int error;
-	struct neighbour *n1, *rc, *n = neigh_alloc(tbl);
+	struct neighbour *n1, *rc, *n = neigh_alloc(tbl);//申请一个neighbour结构体，申请的大小为tbl->entry_size;
 
 	if (!n) {
 		rc = ERR_PTR(-ENOBUFS);
 		goto out;
 	}
-
+	//复制IP地址到邻居结构体中
 	memcpy(n->primary_key, pkey, key_len);
-	n->dev = dev;
-	dev_hold(dev);
+	n->dev = dev;//记录网络设备
+	dev_hold(dev);//增加设备计数
 
-	/* Protocol specific setup. */
+	/* Protocol specific setup. 执行arp_constructor函数 */
 	if (tbl->constructor &&	(error = tbl->constructor(n)) < 0) {
 		rc = ERR_PTR(error);
 		goto out_neigh_release;
 	}
 
 	/* Device specific setup. */
-	if (n->parms->neigh_setup &&
+	if (n->parms->neigh_setup &&//如果指定了安装函数就执行它
 	    (error = n->parms->neigh_setup(n)) < 0) {
 		rc = ERR_PTR(error);
 		goto out_neigh_release;
 	}
-
-	n->confirmed = jiffies - (n->parms->base_reachable_time << 1);
+	//确定时间
+	n->confirmed = jiffies - (n->parms->base_reachable_time << 1);//左移1位，相当于X2
 
 	write_lock_bh(&tbl->lock);
-
+	//如果邻居结构体数量超过了hash桶长度
 	if (atomic_read(&tbl->entries) > (tbl->hash_mask + 1))
-		neigh_hash_grow(tbl, (tbl->hash_mask + 1) << 1);
+		neigh_hash_grow(tbl, (tbl->hash_mask + 1) << 1);//调整hash桶
 
-	hash_val = tbl->hash(pkey, dev) & tbl->hash_mask;
+	hash_val = tbl->hash(pkey, dev) & tbl->hash_mask;//计算hash值
 
-	if (n->parms->dead) {
+	if (n->parms->dead) {//邻居参数失效
 		rc = ERR_PTR(-EINVAL);
 		goto out_tbl_unlock;
 	}
-
+	//在hash桶中查找要插入的队列
 	for (n1 = tbl->hash_buckets[hash_val]; n1; n1 = n1->next) {
 		if (dev == n1->dev && !memcmp(n1->primary_key, pkey, key_len)) {
 			neigh_hold(n1);
-			rc = n1;
+			rc = n1;//记录相同地址和设备的邻居结构，直接返回找到的邻居结构
 			goto out_tbl_unlock;
 		}
 	}
-
+	//走到这个位置，肯定没有找到相同的地址和设备的邻居结构，插入到队列头部
 	n->next = tbl->hash_buckets[hash_val];
-	tbl->hash_buckets[hash_val] = n;
-	n->dead = 0;
-	neigh_hold(n);
+	tbl->hash_buckets[hash_val] = n;//链入到hash桶中
+	n->dead = 0;//清除删除标志
+	neigh_hold(n);//递增使用计数
 	write_unlock_bh(&tbl->lock);
 	NEIGH_PRINTK2("neigh %p is created.\n", n);
-	rc = n;
+	rc = n;//记录返回结果
 out:
 	return rc;
 out_tbl_unlock:
@@ -700,22 +704,22 @@ static void neigh_periodic_timer(unsigned long arg)
 	struct neighbour *n, **np;
 	unsigned long expire, now = jiffies;
 
-	NEIGH_CACHE_STAT_INC(tbl, periodic_gc_runs);
+	NEIGH_CACHE_STAT_INC(tbl, periodic_gc_runs);//周期gc回收次数+1；tbl->stats->periodic_gc_runs++;
 
 	write_lock(&tbl->lock);
 
 	/*
 	 *	periodically recompute ReachableTime from random function
 	 */
-
+	
 	if (time_after(now, tbl->last_rand + 300 * HZ)) {
 		struct neigh_parms *p;
-		tbl->last_rand = now;
+		tbl->last_rand = now;//更新最近一个回收时间
 		for (p = &tbl->parms; p; p = p->next)
 			p->reachable_time =
 				neigh_rand_reach_time(p->base_reachable_time);
 	}
-
+	//每次GC只遍历一个桶
 	np = &tbl->hash_buckets[tbl->hash_chain_gc];
 	tbl->hash_chain_gc = ((tbl->hash_chain_gc + 1) & tbl->hash_mask);
 
@@ -734,12 +738,12 @@ static void neigh_periodic_timer(unsigned long arg)
 			n->used = n->confirmed;
 
 		if (atomic_read(&n->refcnt) == 1 &&
-		    (state == NUD_FAILED ||
-		     time_after(now, n->used + n->parms->gc_staletime))) {
+		    (state == NUD_FAILED ||//状态为失败
+		     time_after(now, n->used + n->parms->gc_staletime))) {//超过了闲置时间
 			*np = n->next;
-			n->dead = 1;
+			n->dead = 1;//标记死亡
 			write_unlock(&n->lock);
-			neigh_cleanup_and_release(n);
+			neigh_cleanup_and_release(n);//清理并释放
 			continue;
 		}
 		write_unlock(&n->lock);
@@ -752,11 +756,12 @@ next_elt:
 	 * ARP entry timeouts range from 1/2 base_reachable_time to 3/2
 	 * base_reachable_time.
 	 */
+	//计算下次gc时间
 	expire = tbl->parms.base_reachable_time >> 1;
 	expire /= (tbl->hash_mask + 1);
 	if (!expire)
 		expire = 1;
-
+	//更新gc_timer
 	if (expire>HZ)
 		mod_timer(&tbl->gc_timer, round_jiffies(now + expire));
 	else
@@ -774,76 +779,81 @@ static __inline__ int neigh_max_probes(struct neighbour *n)
 }
 
 /* Called when a timer expires for a neighbour entry. */
-
+/*
+场景：
+	1. 邻居状态是NUD_INCOMPLETE、NUD_PROBE,需要发送ARP请求报文
+	2. 邻居结构状态为NUD_REACHEABLE状态，需要设置定时器间隔为neigh->parms->reachable_time。Neighbour 处于 REACHABLE 状态后，如果在一段时间内，没有收到过 reply ，那么则怀疑此 neighbor 不可达，需要将它的状态转为 STALE
+	3. 邻居结构状态时NUD_DELAY,设置定时器间隔neigh->parms->delay_probe_time。在 DELAY 状态，数据可以直接发送出去，但是一旦定时器超时，则转入 PROBE 状态。如果在此期间收到过 reply 包，则转为 REACHABLE。
+*/
 static void neigh_timer_handler(unsigned long arg)
 {
 	unsigned long now, next;
-	struct neighbour *neigh = (struct neighbour *)arg;
+	struct neighbour *neigh = (struct neighbour *)arg;//邻居结构
 	unsigned state;
-	int notify = 0;
+	int notify = 0;//状态发生了变更
 
 	write_lock(&neigh->lock);
 
-	state = neigh->nud_state;
+	state = neigh->nud_state;//记录当前状态
 	now = jiffies;
 	next = now + HZ;
 
-	if (!(state & NUD_IN_TIMER)) {
+	if (!(state & NUD_IN_TIMER)) {//避免多次调用定时器
 #ifndef CONFIG_SMP
 		printk(KERN_WARNING "neigh: timer & !nud_in_timer\n");
 #endif
 		goto out;
 	}
 
-	if (state & NUD_REACHABLE) {
+	if (state & NUD_REACHABLE) {//场景@2
 		if (time_before_eq(now,
-				   neigh->confirmed + neigh->parms->reachable_time)) {
+				   neigh->confirmed + neigh->parms->reachable_time)) {//在超时时间内收到了包，注意这里的包可以不是arp包
 			NEIGH_PRINTK2("neigh %p is still alive.\n", neigh);
-			next = neigh->confirmed + neigh->parms->reachable_time;
+			next = neigh->confirmed + neigh->parms->reachable_time;//重置NUD_REACHABLE状态超时时间
 		} else if (time_before_eq(now,
-					  neigh->used + neigh->parms->delay_probe_time)) {
+					  neigh->used + neigh->parms->delay_probe_time)) {//在超时时间范围内，该邻居结构被使用过(状态还是NUD_REACHABLE)。说明该邻居结构有可能有效，值得一试，将状态置为 NUD_DELAY(表示是NUD_REACHABLE的延迟)。在 DELAY 状态，数据可以直接发送出去
 			NEIGH_PRINTK2("neigh %p is delayed.\n", neigh);
 			neigh->nud_state = NUD_DELAY;
 			neigh->updated = jiffies;
 			neigh_suspect(neigh);
-			next = now + neigh->parms->delay_probe_time;
-		} else {
+			next = now + neigh->parms->delay_probe_time;//从NUD_DELAY状态进入NUD_PROBE状态时间。如果在此期间收到过 reply 包，则转为 REACHABLE。
+		} else {//在定时器超时时间内，没有收到任何包，也没有使用过，则将其置为NUD_STALE,表示怀疑此 neighbor 不可达
 			NEIGH_PRINTK2("neigh %p is suspected.\n", neigh);
 			neigh->nud_state = NUD_STALE;
 			neigh->updated = jiffies;
 			neigh_suspect(neigh);
 			notify = 1;
 		}
-	} else if (state & NUD_DELAY) {
+	} else if (state & NUD_DELAY) {//场景@3
 		if (time_before_eq(now,
-				   neigh->confirmed + neigh->parms->delay_probe_time)) {
+				   neigh->confirmed + neigh->parms->delay_probe_time)) {//在定时器时间间隔内，收到了reply包，直接转成REACHABLE状态
 			NEIGH_PRINTK2("neigh %p is now reachable.\n", neigh);
 			neigh->nud_state = NUD_REACHABLE;
 			neigh->updated = jiffies;
 			neigh_connect(neigh);
 			notify = 1;
-			next = neigh->confirmed + neigh->parms->reachable_time;
-		} else {
+			next = neigh->confirmed + neigh->parms->reachable_time;//重置NUD_REACHABLE状态超时时间
+		} else {//在定时器时间间隔内，没有收到任何reply包，则将状态变更为PROBE
 			NEIGH_PRINTK2("neigh %p is probed.\n", neigh);
 			neigh->nud_state = NUD_PROBE;
 			neigh->updated = jiffies;
 			atomic_set(&neigh->probes, 0);
-			next = now + neigh->parms->retrans_time;
+			next = now + neigh->parms->retrans_time;//下次probe的时间
 		}
-	} else {
+	} else {//TODO:场景@1
 		/* NUD_PROBE|NUD_INCOMPLETE */
-		next = now + neigh->parms->retrans_time;
+		next = now + neigh->parms->retrans_time;//计算下次重试时间
 	}
-
+	//只有在NUD_INCOMPLETE和NUD_PROBE状态下才会发送ARP报文，所以需要判断发送ARP报文次数
 	if ((neigh->nud_state & (NUD_INCOMPLETE | NUD_PROBE)) &&
-	    atomic_read(&neigh->probes) >= neigh_max_probes(neigh)) {
+	    atomic_read(&neigh->probes) >= neigh_max_probes(neigh)) {//判断发送arp报文是否超限
 		struct sk_buff *skb;
 
-		neigh->nud_state = NUD_FAILED;
+		neigh->nud_state = NUD_FAILED;//标记为失败
 		neigh->updated = jiffies;
-		notify = 1;
-		NEIGH_CACHE_STAT_INC(neigh->tbl, res_failed);
-		NEIGH_PRINTK2("neigh %p is failed.\n", neigh);
+		notify = 1;//失败情况下进行通知
+		NEIGH_CACHE_STAT_INC(neigh->tbl, res_failed);//计数器tbl->stats->res_failed加1
+		NEIGH_PRINTK2("neigh %p is failed.\n", neigh);//打印失败信息,dmesg可以查看
 
 		/* It is very thin place. report_unreachable is very complicated
 		   routine. Particularly, it can hit the same neighbour entry!
@@ -851,29 +861,30 @@ static void neigh_timer_handler(unsigned long arg)
 		   So that, we try to be accurate and avoid dead loop. --ANK
 		 */
 		while (neigh->nud_state == NUD_FAILED &&
-		       (skb = __skb_dequeue(&neigh->arp_queue)) != NULL) {
+		       (skb = __skb_dequeue(&neigh->arp_queue)) != NULL) {//从arp队列中取出一个skb
 			write_unlock(&neigh->lock);
-			neigh->ops->error_report(neigh, skb);
+			neigh->ops->error_report(neigh, skb);//通知L3层发生的错误
 			write_lock(&neigh->lock);
 		}
 		skb_queue_purge(&neigh->arp_queue);
 	}
-
+	//场景@1
 	if (neigh->nud_state & NUD_IN_TIMER) {
-		if (time_before(next, jiffies + HZ/2))
+		if (time_before(next, jiffies + HZ/2))//定时器到期时间小于当前时间
 			next = jiffies + HZ/2;
-		if (!mod_timer(&neigh->timer, next))
+		if (!mod_timer(&neigh->timer, next))//重置定时器
 			neigh_hold(neigh);
 	}
+	//场景@1
 	if (neigh->nud_state & (NUD_INCOMPLETE | NUD_PROBE)) {
-		struct sk_buff *skb = skb_peek(&neigh->arp_queue);
+		struct sk_buff *skb = skb_peek(&neigh->arp_queue);//从待发送队列中获得一个待发送的包，注意这里使用peek，这个包并没有出队列。
 		/* keep skb alive even if arp_queue overflows */
 		if (skb)
-			skb = skb_copy(skb, GFP_ATOMIC);
+			skb = skb_copy(skb, GFP_ATOMIC);//拷贝一份
 		write_unlock(&neigh->lock);
-		neigh->ops->solicit(neigh, skb);
-		atomic_inc(&neigh->probes);
-		if (skb)
+		neigh->ops->solicit(neigh, skb);//发送ARP报文，再arp_rcv中会将邻居结构状态置为NUD_REACHABLE
+		atomic_inc(&neigh->probes);//增加探测次数，注意NUD_INCOMPLETE也算在内
+		if (skb)//发送完成，则释放
 			kfree_skb(skb);
 	} else {
 out:
@@ -894,44 +905,46 @@ int __neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
 	write_lock_bh(&neigh->lock);
 
 	rc = 0;
+	//如果是链接、延迟、探测状态就退出。
 	if (neigh->nud_state & (NUD_CONNECTED | NUD_DELAY | NUD_PROBE))
 		goto out_unlock_bh;
 
-	now = jiffies;
-
-	if (!(neigh->nud_state & (NUD_STALE | NUD_INCOMPLETE))) {
+	now = jiffies;//记录当前时间
+	//当前邻居状态不是过期状态或者未完成状态。
+	if (!(neigh->nud_state & (NUD_STALE | NUD_INCOMPLETE))) {//只有NUD_NONE状态就进入这个分支
+		//检查邻居参数结构的探测值
 		if (neigh->parms->mcast_probes + neigh->parms->app_probes) {
 			atomic_set(&neigh->probes, neigh->parms->ucast_probes);
-			neigh->nud_state     = NUD_INCOMPLETE;
-			neigh->updated = jiffies;
-			neigh_add_timer(neigh, now + 1);
-		} else {
-			neigh->nud_state = NUD_FAILED;
-			neigh->updated = jiffies;
+			neigh->nud_state     = NUD_INCOMPLETE;//修改为未完成状态
+			neigh->updated = jiffies;//记录更新时间
+			neigh_add_timer(neigh, now + 1);//设置定时器,发送arp报文，注意这里的到期时间为now+1，几乎时同时调用
+		} else {//没有设定探测值
+			neigh->nud_state = NUD_FAILED;//修改为失败状态
+			neigh->updated = jiffies;//记录更新值
 			write_unlock_bh(&neigh->lock);
 
-			if (skb)
+			if (skb)//释放发送的数据包
 				kfree_skb(skb);
 			return 1;
 		}
-	} else if (neigh->nud_state & NUD_STALE) {
+	} else if (neigh->nud_state & NUD_STALE) {//使用过期状态中邻居表项，直接使用，同时需要将状态为延迟状态
 		NEIGH_PRINTK2("neigh %p is delayed.\n", neigh);
-		neigh->nud_state = NUD_DELAY;
-		neigh->updated = jiffies;
+		neigh->nud_state = NUD_DELAY;//修改为延迟状态
+		neigh->updated = jiffies;//记录更新时间
 		neigh_add_timer(neigh,
-				jiffies + neigh->parms->delay_probe_time);
+				jiffies + neigh->parms->delay_probe_time);//设置定时器，定时器函数为neigh_timer_handler
 	}
-
-	if (neigh->nud_state == NUD_INCOMPLETE) {
-		if (skb) {
+	//arp队列数据包长度超过队列长度，则丢弃最早加入的数据包
+	if (neigh->nud_state == NUD_INCOMPLETE) {//未完成状态
+		if (skb) {//需要发送数据包
 			if (skb_queue_len(&neigh->arp_queue) >=
-			    neigh->parms->queue_len) {
+			    neigh->parms->queue_len) {//检查队列长度
 				struct sk_buff *buff;
-				buff = neigh->arp_queue.next;
-				__skb_unlink(buff, &neigh->arp_queue);
-				kfree_skb(buff);
+				buff = neigh->arp_queue.next;//取出不能完成的数据包
+				__skb_unlink(buff, &neigh->arp_queue);//从队列中脱链
+				kfree_skb(buff);//释放包
 			}
-			__skb_queue_tail(&neigh->arp_queue, skb);
+			__skb_queue_tail(&neigh->arp_queue, skb);//将发送的数据包入队列
 		}
 		rc = 1;
 	}
@@ -978,7 +991,17 @@ static void neigh_update_hhs(struct neighbour *neigh)
 
    Caller MUST hold reference count on the entry.
  */
-
+/*
+该函数的功能:邻居项的更新，主要是更新二层地址与邻居项的状态，并会根据邻居项的状态，选择相对应的输出函数
+该函数主要流程：
+	1、判断输入二层地址，判断是否需要覆盖邻居项的二层地址
+	2、判断邻居项状态的改变是否合法
+	3、根据不同的邻居项状态设置不同的邻居项输出函数，并设置与该邻居项关联的所有二层缓存头部
+该函数被调用的情形有:
+	1、当接收到邻居项的应答报文后，则会调用该函数更新二层地址和状态为NUD_REACHABLE
+ 	2、当接收到邻居项的请求报文后，则会调用该函数将邻居项的状态设置为STALE
+	3、处理通过ioctl或者netlink执行的邻居项的添加、删除邻居项时，也会调用该函数更新邻居项的状态与二层地址
+*/
 int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
 		 u32 flags)
 {
@@ -990,14 +1013,21 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
 
 	write_lock_bh(&neigh->lock);
 
-	dev    = neigh->dev;
-	old    = neigh->nud_state;
+	dev    = neigh->dev;//网络设备
+	old    = neigh->nud_state;//邻居结构的原始状态
 	err    = -EPERM;
-
+	/*
+		对于邻居项的原状态为NOARP或者PERMANENT，且不是admin发送的请求，则直接返回
+	*/
 	if (!(flags & NEIGH_UPDATE_F_ADMIN) &&
 	    (old & (NUD_NOARP | NUD_PERMANENT)))
 		goto out;
-
+/*
+当邻居项状态不是有效状态时(即是NUD_INCOMPLET、NUD_NONE、NUD_FAILED):
+1、删除该邻居项的定时器
+2、对于原状态是CONNECT而新状态不是有效态时，则调用neigh_suspect将邻居项的输出函数设置为通用输出函数
+3、如果原状态是NUD_INCOMPLETE或者NUD_PROBE，且新状态为NUD_FAILED时，则调用neigh_invalidate发送错误报告，并发送通知信息，函数返回
+*/
 	if (!(new & NUD_VALID)) {
 		neigh_del_timer(neigh);
 		if (old & NUD_CONNECTED)
@@ -1007,7 +1037,16 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
 		notify = old & NUD_VALID;
 		goto out;
 	}
-
+/*
+1、对于设备二层地址长度为0的情形，则不需要更新二层地址，直接使用neigh->ha
+2、原状态为有效的，且要更改的地址与邻居项存储的地址相同，则无需更改
+3、原状态为无效，且要更改的地址也是无效，则是逻辑错误，函数直接返回
+4、原状态有效，且要更改的地址无效时，则先将地址设置为邻居项的地址. ???
+5、其他情况下不更改传进来的二层地址。
+即:
+ 原状态有效，且修改的地址与原邻居项地址不同
+ 原状态无效，且修改的地址有效时
+*/
 	/* Compare new lladdr with cached one */
 	if (!dev->addr_len) {
 		/* First case: device needs no address. */
@@ -1030,7 +1069,10 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
 			goto out;
 		lladdr = neigh->ha;
 	}
-
+/*
+1、邻居项的新状态是CONNECTED时，更新confirmed时间
+2、更新update时间
+*/
 	if (new & NUD_CONNECTED)
 		neigh->confirmed = jiffies;
 	neigh->updated = jiffies;
@@ -1038,6 +1080,11 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
 	/* If entry was valid and address is not changed,
 	   do not change entry state, if new one is STALE.
 	 */
+/*
+1、原状态有效，且不允许覆盖原来值时，且二层地址不同，且原状态为CONNECT时，则不更新邻居项的二层地址，而只是将状态设置为STALE(这是在二层地址不同时，不修改二层地址的最后一个条件)
+2、原状态有效，且二层地址不变，且新状态为STALE时，则不改邻居项的状态
+*/
+
 	err = 0;
 	update_isrouter = flags & NEIGH_UPDATE_F_OVERRIDE_ISROUTER;
 	if (old & NUD_VALID) {
@@ -1057,36 +1104,49 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
 				new = old;
 		}
 	}
-
+	//设置定时器，定时器间隔为neigh->parms->reachable_time。
+	//Neighbour 处于 REACHABLE 状态后，如果在一段时间内，没有收到过 reply ，那么则怀疑此 neighbor 不可达，需要将它的状态转为 STALE
+	/*
+	当邻居项的新旧状态不同时，则会删除定时器。若新状态是NUD_TIMER，则重新添加定时器。(其中对于定时器的超时时间，如果新状态为NUD_REACHABLE，则将
+	超时时间设置为reachable_time，否则将定时器的超时时间设置为当前时间)设置邻居项的状态为新状态
+	*/
 	if (new != old) {
-		neigh_del_timer(neigh);
+		neigh_del_timer(neigh);//摘除定时器
 		if (new & NUD_IN_TIMER)
 			neigh_add_timer(neigh, (jiffies +
 						((new & NUD_REACHABLE) ?
 						 neigh->parms->reachable_time :
-						 0)));
-		neigh->nud_state = new;
+						 0)));//重置定时器
+		neigh->nud_state = new;//修改状态
 	}
-
-	if (lladdr != neigh->ha) {
-		memcpy(&neigh->ha, lladdr, dev->addr_len);
+	/*
+	如果邻居项的二层地址不同，则更新邻居项里的二层地址，并
+	调用neigh_update_hhs，更新与该邻居项相关联的所有二层头部缓存。
+	如果新状态不是CONNECT状态，则将confirm时间设置为比当前时间早
+	2*base_reachable_time.
+	根据邻居项的不同更新邻居项的输出函数:
+	当为NUD_CONNECTED，则调用neigh_connect将邻居项的输出函数设置为快速输出函数
+	当为非NUD_CONNECTED，则调用neigh_suspect将邻居项的输出函数设置为通用输出函数
+	*/
+	if (lladdr != neigh->ha) {//如果服务器 MAC 地址与原来记录的不同
+		memcpy(&neigh->ha, lladdr, dev->addr_len);//记录服务器MAC地址
 		neigh_update_hhs(neigh);
 		if (!(new & NUD_CONNECTED))
 			neigh->confirmed = jiffies -
-				      (neigh->parms->base_reachable_time << 1);
+				      (neigh->parms->base_reachable_time << 1);//调整确定时间
 		notify = 1;
 	}
-	if (new == old)
+	if (new == old)//原始状态和修改状态相同则直接返回
 		goto out;
-	if (new & NUD_CONNECTED)
-		neigh_connect(neigh);
+	if (new & NUD_CONNECTED)//连接状态
+		neigh_connect(neigh);//重新设置邻居结构的发送函数
 	else
-		neigh_suspect(neigh);
+		neigh_suspect(neigh);//设置邻居结构的发送函数
 	if (!(old & NUD_VALID)) {
 		struct sk_buff *skb;
 
 		/* Again: avoid dead loop if something went wrong */
-
+		//循环发送 ARP 队列中的数据包
 		while (neigh->nud_state & NUD_VALID &&
 		       (skb = __skb_dequeue(&neigh->arp_queue)) != NULL) {
 			struct neighbour *n1 = neigh;
@@ -1094,21 +1154,21 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
 			/* On shaper/eql skb->dst->neighbour != neigh :( */
 			if (skb->dst && skb->dst->neighbour)
 				n1 = skb->dst->neighbour;
-			n1->output(skb);
+			n1->output(skb);//调用邻居结构的发送函数发送数据包
 			write_lock_bh(&neigh->lock);
 		}
-		skb_queue_purge(&neigh->arp_queue);
+		skb_queue_purge(&neigh->arp_queue);//释放队列中的数据包
 	}
 out:
 	if (update_isrouter) {
 		neigh->flags = (flags & NEIGH_UPDATE_F_ISROUTER) ?
 			(neigh->flags | NTF_ROUTER) :
-			(neigh->flags & ~NTF_ROUTER);
+			(neigh->flags & ~NTF_ROUTER);//修改邻居结构标志
 	}
 	write_unlock_bh(&neigh->lock);
 
 	if (notify)
-		neigh_update_notify(neigh);
+		neigh_update_notify(neigh);//调用更新通知函数
 
 	return err;
 }
@@ -1118,11 +1178,18 @@ struct neighbour *neigh_event_ns(struct neigh_table *tbl,
 				 u8 *lladdr, void *saddr,
 				 struct net_device *dev)
 {
+	//寻找arp表邻居结构，__neigh_lookup()查询不到会创建一个邻居结构
 	struct neighbour *neigh = __neigh_lookup(tbl, saddr, dev,
 						 lladdr || !dev->addr_len);
+/*
+	对于接收到一个arp的请求报文而创建的邻居项，因为既然有远方的arp请求，则会有数据发送过来，此时创建的邻居项，
+	就没必要将邻居项的状态设置为NUD_INCOMPLETE而发送arp请求，但也不能直接就将状态设置为NUD_REACHABLE,此时是将邻居项的状态设置为NUD_STALE，
+	这样如果远方有数据发送过来，而且需要通过该邻居项发送数据到远方，就会将状态设置为NUD_DELAY(在__neigh_event_send()函数中设置)，如果再收到该远方发来的四层数据的确认等，
+	就间接实现了邻居项的确认，再将状态设置位NUD_REACHABLE
+*/
 	if (neigh)
 		neigh_update(neigh, lladdr, NUD_STALE,
-			     NEIGH_UPDATE_F_OVERRIDE);
+			     NEIGH_UPDATE_F_OVERRIDE);//更新邻居结构状态为NUD_STALE
 	return neigh;
 }
 EXPORT_SYMBOL(neigh_event_ns);
@@ -1132,18 +1199,18 @@ static void neigh_hh_init(struct neighbour *n, struct dst_entry *dst,
 {
 	struct hh_cache	*hh;
 	struct net_device *dev = dst->dev;
-
+	//遍历该hh_cache链表，选择对应的protocol的二层头缓存
 	for (hh = n->hh; hh; hh = hh->hh_next)
 		if (hh->hh_type == protocol)
 			break;
-
-	if (!hh && (hh = kzalloc(sizeof(*hh), GFP_ATOMIC)) != NULL) {
+	//如果找到了，就直接返回，否则就创建一个
+	if (!hh && (hh = kzalloc(sizeof(*hh), GFP_ATOMIC)) != NULL) {//创建hh_cache缓存
 		seqlock_init(&hh->hh_lock);
 		hh->hh_type = protocol;
 		atomic_set(&hh->hh_refcnt, 0);
 		hh->hh_next = NULL;
 
-		if (dev->header_ops->cache(n, hh)) {
+		if (dev->header_ops->cache(n, hh)) {//这里的cache以eth为例，cache是eth_header_cache()构造
 			kfree(hh);
 			hh = NULL;
 		} else {
@@ -1183,27 +1250,27 @@ int neigh_compat_output(struct sk_buff *skb)
 EXPORT_SYMBOL(neigh_compat_output);
 
 /* Slow and careful. */
-
+//将二层头填充到skb中，并调用dev_queue_xmit()发送
 int neigh_resolve_output(struct sk_buff *skb)
 {
-	struct dst_entry *dst = skb->dst;
+	struct dst_entry *dst = skb->dst;//获取路由项
 	struct neighbour *neigh;
 	int rc = 0;
 
-	if (!dst || !(neigh = dst->neighbour))
+	if (!dst || !(neigh = dst->neighbour))//如果没有路由项或者没有邻居项直接丢弃
 		goto discard;
 
 	__skb_pull(skb, skb_network_offset(skb));
 
-	if (!neigh_event_send(neigh, skb)) {
+	if (!neigh_event_send(neigh, skb)) {//检查邻居结构是否可用，如果可用则继续发送
 		int err;
 		struct net_device *dev = neigh->dev;
-		if (dev->header_ops->cache && !dst->hh) {
+		if (dev->header_ops->cache && !dst->hh) {//cache的作用就是将二层头缓存到neighbour结构体中hh中
 			write_lock_bh(&neigh->lock);
-			if (!dst->hh)
-				neigh_hh_init(neigh, dst, dst->ops->protocol);
+			if (!dst->hh)//路由项中的二层头hh为空，需要使用neighbour结构体中的hh缓存，注意：neighbour结构体中的hh是一个链表结构。
+				neigh_hh_init(neigh, dst, dst->ops->protocol);//遍历neighbour结构体中hh缓存链表的缓存，赋值给dst->hh
 			err = dev_hard_header(skb, dev, ntohs(skb->protocol),
-					      neigh->ha, NULL, skb->len);
+					      neigh->ha, NULL, skb->len);//通过调用dev->header_ops->create()(eth_header)函数将目的mac、源mac地址写入skb包中
 			write_unlock_bh(&neigh->lock);
 		} else {
 			read_lock_bh(&neigh->lock);
@@ -1212,7 +1279,7 @@ int neigh_resolve_output(struct sk_buff *skb)
 			read_unlock_bh(&neigh->lock);
 		}
 		if (err >= 0)
-			rc = neigh->ops->queue_xmit(skb);
+			rc = neigh->ops->queue_xmit(skb);//将skb包发送出去，queue_xmit是dev_queue_xmit()函数
 		else
 			goto out_kfree_skb;
 	}
@@ -1413,9 +1480,9 @@ void neigh_table_init_no_netlink(struct neigh_table *tbl)
 	unsigned long phsize;
 
 #ifdef CONFIG_NET_NS
-	tbl->parms.net = &init_net;
+	tbl->parms.net = &init_net;//默认的net
 #endif
-	atomic_set(&tbl->parms.refcnt, 1);
+	atomic_set(&tbl->parms.refcnt, 1);//初始化引用计数为1，因为要插入到全局的neighbour_tables中
 	INIT_RCU_HEAD(&tbl->parms.rcu_head);
 	tbl->parms.reachable_time =
 			  neigh_rand_reach_time(tbl->parms.base_reachable_time);
@@ -1448,6 +1515,7 @@ void neigh_table_init_no_netlink(struct neigh_table *tbl)
 	get_random_bytes(&tbl->hash_rnd, sizeof(tbl->hash_rnd));
 
 	rwlock_init(&tbl->lock);
+	//定时任务，用于定时清理邻居表项
 	setup_timer(&tbl->gc_timer, neigh_periodic_timer, (unsigned long)tbl);
 	tbl->gc_timer.expires  = now + 1;
 	add_timer(&tbl->gc_timer);
@@ -1460,21 +1528,23 @@ void neigh_table_init_no_netlink(struct neigh_table *tbl)
 	tbl->last_rand	= now + tbl->parms.reachable_time * 20;
 }
 EXPORT_SYMBOL(neigh_table_init_no_netlink);
-
+//将tbl插入到全局neigh_tables链表中
 void neigh_table_init(struct neigh_table *tbl)
 {
 	struct neigh_table *tmp;
 
 	neigh_table_init_no_netlink(tbl);
 	write_lock(&neigh_tbl_lock);
+	//判断是否已经存在了
 	for (tmp = neigh_tables; tmp; tmp = tmp->next) {
 		if (tmp->family == tbl->family)
 			break;
 	}
+	//插入到链表头
 	tbl->next	= neigh_tables;
 	neigh_tables	= tbl;
 	write_unlock(&neigh_tbl_lock);
-
+	//存在则发出错误信息
 	if (unlikely(tmp)) {
 		printk(KERN_ERR "NEIGH: Registering multiple tables for "
 		       "family %d\n", tbl->family);
@@ -2737,12 +2807,12 @@ int neigh_sysctl_register(struct net_device *dev, struct neigh_parms *p,
 	t->neigh_vars[13].data  = &p->base_reachable_time;
 
 	if (dev) {
-		dev_name_source = dev->name;
+		dev_name_source = dev->name;//设备名
 		neigh_path[NEIGH_CTL_PATH_DEV].ctl_name = dev->ifindex;
 		/* Terminate the table early */
 		memset(&t->neigh_vars[14], 0, sizeof(t->neigh_vars[14]));
 	} else {
-		dev_name_source = neigh_path[NEIGH_CTL_PATH_DEV].procname;
+		dev_name_source = neigh_path[NEIGH_CTL_PATH_DEV].procname;//此处为default
 		t->neigh_vars[14].data = (int *)(p + 1);
 		t->neigh_vars[15].data = (int *)(p + 1) + 1;
 		t->neigh_vars[16].data = (int *)(p + 1) + 2;

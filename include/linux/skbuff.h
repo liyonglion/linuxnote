@@ -268,7 +268,7 @@ struct sk_buff {
 	 * layer. Please put your private variables there. If you
 	 * want to keep them across layers you have to do a skb_clone()
 	 * first. This is owned by whoever has the skb queued ATM.
-	 下方的 c 是控制数据块,它被每个层使用，如果你想传输自定义变量内容,则它们放在这个数组中，前提是必须通过 skbclone()函数克隆一个数据包
+	 下方的 c 是控制数据块,它被每个层使用，如果你想传输自定义变量内容,则它们放在这个数组中，前提是必须通过 skbclone()函数克隆一个数据包，克隆的原因是为了放弃覆盖其他层设置的数据
 	 */
 	char			cb[48];
 

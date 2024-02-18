@@ -29,20 +29,31 @@
 /*
  * NUD stands for "neighbor unreachability detection"
  */
-
+/*
+对于NUD_IN_TIMER，通过名称我们就知道，当邻居项处于该状态时，则会启动定时器。下面我们一一分析这几个邻居项状态，通过分
+析完这几个状态，我们就基本上会理解邻居项状态机中定时器处理函数neigh timer handler() 的设计逻辑了。
+*/
 #define NUD_IN_TIMER	(NUD_INCOMPLETE|NUD_REACHABLE|NUD_DELAY|NUD_PROBE)
+/*
+在领居协议的基本状态中，处于NUD_REACHABLE、NUD_PROBE、NUD_STALE、NUD_DELAY状态时，数据包是可以正常发送的只是发送的函数不同。
+这样就不难理解NUD_VALID包含NUD_PERMANENT、NUD_NOARP、NUD_REACHABLE、NUD_PROBENUD 、NUD_STALE、NUD_DELAY了
+*/
 #define NUD_VALID	(NUD_PERMANENT|NUD_NOARP|NUD_REACHABLE|NUD_PROBE|NUD_STALE|NUD_DELAY)
+/*
+主要是表示邻居是可达的状态，对于NUD_PERMANENT、NUD_NOARP状态的邻居项，其邻居状态是不会改变的，一直是有效的，除
+非删除该邻居项。
+*/
 #define NUD_CONNECTED	(NUD_PERMANENT|NUD_NOARP|NUD_REACHABLE)
 
 struct neighbour;
 
-struct neigh_parms
+struct neigh_parms//代表的是邻居协议在每个设备上的不同参数
 {
 #ifdef CONFIG_NET_NS
-	struct net *net;
+	struct net *net; //所属网络
 #endif
-	struct net_device *dev;
-	struct neigh_parms *next;
+	struct net_device *dev;//所属设备
+	struct neigh_parms *next;//因为一个设备可以配置多个不同的邻居协议，所以会有多个neigh_parms
 	int	(*neigh_setup)(struct neighbour *);
 	void	(*neigh_cleanup)(struct neighbour *);
 	struct neigh_table *tbl;
@@ -53,14 +64,14 @@ struct neigh_parms
 	atomic_t refcnt;
 	struct rcu_head rcu_head;
 
-	int	base_reachable_time;
-	int	retrans_time;
-	int	gc_staletime;
-	int	reachable_time;
-	int	delay_probe_time;
+	int	base_reachable_time;//reachable 有效时，arp默认为30s
+	int	retrans_time;//solicit请求报文重发间隔时。arp默认为1s
+	int	gc_staletime; //闲置时间。arp默认为300s
+	int	reachable_time;//确认有效时间超时长，，这个值默认为30s
+	int	delay_probe_time;//probe延迟时间。arp默认为5s
 
-	int	queue_len;
-	int	ucast_probes;
+	int	queue_len; //arp队列长度
+	int	ucast_probes; //再NUD_PROBE状态下，最大发送arp报文次数
 	int	app_probes;
 	int	mcast_probes;
 	int	anycast_delay;
@@ -96,36 +107,37 @@ struct neigh_statistics
 
 struct neighbour
 {
-	struct neighbour	*next;
-	struct neigh_table	*tbl;
-	struct neigh_parms	*parms;
-	struct net_device		*dev;
-	unsigned long		used;
-	unsigned long		confirmed;
-	unsigned long		updated;
-	__u8			flags;
-	__u8			nud_state;
-	__u8			type;
-	__u8			dead;
-	atomic_t		probes;
-	rwlock_t		lock;
-	unsigned char		ha[ALIGN(MAX_ADDR_LEN, sizeof(unsigned long))];
-	struct hh_cache		*hh;
-	atomic_t		refcnt;
-	int			(*output)(struct sk_buff *skb);
-	struct sk_buff_head	arp_queue;
-	struct timer_list	timer;
-	struct neigh_ops	*ops;
-	u8			primary_key[0];
+	struct neighbour	*next;//指向下一个邻居的指针
+	struct neigh_table	*tbl;//所属的邻居表结构
+	struct neigh_parms	*parms; //邻居参数结，用in_dev->arp_param进行赋值
+	struct net_device		*dev; //网络设备指针，这个设备指的是配置primary_key中IP地址的设备。
+	unsigned long		used; //邻居结构使用时间
+	unsigned long		confirmed; //NUD_CONNECTED时间
+	unsigned long		updated;//状态更新时间
+	__u8			flags; //标志位
+	__u8			nud_state;//状态标志
+	__u8			type;//记录primary_key中IP地址类型，是RTN_BROADCAST、RTN_UNICAST还是RTN_MULTICAST、RTN_LOCAL
+	__u8			dead; //删除标志
+	atomic_t		probes; //记录邻居发送的solicit请求次数
+	rwlock_t		lock;//读写锁
+	unsigned char		ha[ALIGN(MAX_ADDR_LEN, sizeof(unsigned long))];//学习到的MAC地址
+	//TODO： 为什么这个地方为什么需要使用链表？
+	struct hh_cache		*hh;//链路层头部缓存，加速发送。
+	atomic_t		refcnt;//使用计数器
+	int			(*output)(struct sk_buff *skb);//发送函数指针
+	struct sk_buff_head	arp_queue;//需要处理的数据包队列。当没有学习到MAC地址时，将数据包放入该队列，等待学习到MAC地址后，再发送数据包
+	struct timer_list	timer;//定时器队列，用于定时发送arp报文以及超时重传arp报文
+	struct neigh_ops	*ops;//操作函数表
+	u8			primary_key[0];//主键值，一般是网关地址,即IP地址
 };
 
 struct neigh_ops
 {
-	int			family;
-	void			(*solicit)(struct neighbour *, struct sk_buff*);
-	void			(*error_report)(struct neighbour *, struct sk_buff*);
-	int			(*output)(struct sk_buff*);
-	int			(*connected_output)(struct sk_buff*);
+	int			family;//协议。arp情况下为AF_INET
+	void			(*solicit)(struct neighbour *, struct sk_buff*);//发送邻居请求的函数指。。
+	void			(*error_report)(struct neighbour *, struct sk_buff*);//当有效数据要发送，而邻居不可，则调用该函数向三层发送错误信息
+	int			(*output)(struct sk_buff*);//输出函数
+	int			(*connected_output)(struct sk_buff*);//当邻居可达时，使用该函数进行发送数据包
 	int			(*hh_output)(struct sk_buff*);
 	int			(*queue_xmit)(struct sk_buff*);
 };
@@ -148,38 +160,38 @@ struct pneigh_entry
 
 struct neigh_table
 {
-	struct neigh_table	*next;
-	int			family;
-	int			entry_size;
-	int			key_len;
-	__u32			(*hash)(const void *pkey, const struct net_device *);
-	int			(*constructor)(struct neighbour *);
-	int			(*pconstructor)(struct pneigh_entry *);
-	void			(*pdestructor)(struct pneigh_entry *);
+	struct neigh_table	*next;//指向队列中的下一个邻居表
+	int			family;//协议族
+	int			entry_size;//邻居结构的总长度，邻居结构的最后要放一个IP地址作为hash值
+	int			key_len;//IP地址长度
+	__u32			(*hash)(const void *pkey, const struct net_device *);//hash函数
+	int			(*constructor)(struct neighbour *);//neighbour结构的创建函数指针
+	int			(*pconstructor)(struct pneigh_entry *);//IPv6 pneigh_entry结构的创建函数指针
+	void			(*pdestructor)(struct pneigh_entry *);//IPv6 pneigh_entry结构的销毁函数指针
 	void			(*proxy_redo)(struct sk_buff *skb);
 	char			*id;
-	struct neigh_parms	parms;
+	struct neigh_parms	parms;//邻居参数结构
 	/* HACK. gc_* shoul follow parms without a gap! */
-	int			gc_interval;
-	int			gc_thresh1;
-	int			gc_thresh2;
-	int			gc_thresh3;
-	unsigned long		last_flush;
-	struct timer_list 	gc_timer;
-	struct timer_list 	proxy_timer;
-	struct sk_buff_head	proxy_queue;
-	atomic_t		entries;
-	rwlock_t		lock;
-	unsigned long		last_rand;
-	struct kmem_cache		*kmem_cachep;
-	struct neigh_statistics	*stats;
-	struct neighbour	**hash_buckets;
-	unsigned int		hash_mask;
-	__u32			hash_rnd;
-	unsigned int		hash_chain_gc;
-	struct pneigh_entry	**phash_buckets;
+	int			gc_interval;//回收间隔时间
+	int			gc_thresh1;//回收最小阈值
+	int			gc_thresh2;//回收中等阈值
+	int			gc_thresh3;//回收最大阈值
+	unsigned long		last_flush;//最近一次回收时间
+	struct timer_list 	gc_timer;//回收定时器
+	struct timer_list 	proxy_timer;//代理定时器
+	struct sk_buff_head	proxy_queue;//代理队列
+	atomic_t		entries;//邻居结构数量
+	rwlock_t		lock; //读写锁
+	unsigned long		last_rand;//最近更新时间
+	struct kmem_cache		*kmem_cachep;//用于分配邻居结构的缓存
+	struct neigh_statistics	*stats;//邻居统计结构
+	struct neighbour	**hash_buckets;//邻居结构hash桶
+	unsigned int		hash_mask;//hash桶数量
+	__u32			hash_rnd;//哈希值
+	unsigned int		hash_chain_gc;//下一个要搜索的hahs值队列
+	struct pneigh_entry	**phash_buckets;//保存IP地址的队列
 #ifdef CONFIG_PROC_FS
-	struct proc_dir_entry	*pde;
+	struct proc_dir_entry	*pde;//proc文件系统
 #endif
 };
 
@@ -315,7 +327,8 @@ static inline void neigh_confirm(struct neighbour *neigh)
 
 static inline int neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
 {
-	neigh->used = jiffies;
+	neigh->used = jiffies;//保存邻居使用时间
+	//检查邻居状态不处于链接、延迟、探测状态，则发送arp报文。处于这几个状态时可以直接发送数据包，而不用发送arp报文。
 	if (!(neigh->nud_state&(NUD_CONNECTED|NUD_DELAY|NUD_PROBE)))
 		return __neigh_event_send(neigh, skb);
 	return 0;

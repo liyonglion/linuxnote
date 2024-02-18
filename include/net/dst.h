@@ -67,7 +67,7 @@ struct dst_entry
 	struct dst_entry	*path;
 
 	struct neighbour	*neighbour;/*关联的邻居项*/
-	struct hh_cache		*hh;/*指向二层头部缓存相关的数据结构变量*/
+	struct hh_cache		*hh;/*指向二层头部缓存相关的数据结构变量，用于快速构建二层头*/
 	struct xfrm_state	*xfrm;/*xfrm相关的指针*/
 	/*输入、输出相关的函数指针，当在函数ip_rcv_finish中，完成路由的查找后，即会
 	根据input、output函数，传递数据包，对于本地接收的数据包，则其input函数为

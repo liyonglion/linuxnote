@@ -36,15 +36,36 @@ enum
 /*
  *	Neighbor Cache Entry States.
  */
-
-#define NUD_INCOMPLETE	0x01
-#define NUD_REACHABLE	0x02
-#define NUD_STALE	0x04
-#define NUD_DELAY	0x08
-#define NUD_PROBE	0x10
-#define NUD_FAILED	0x20
+/*
+对于NUD_INCOMPLETE，当本机发送完arp 请求包后，还未收到应答时，即会进入该状态，进入该状态，即会启动定时器，如果在定时器到期后，
+还没有收到应答时:如果没有到达最大发包上限时，即会重新进行发送请求报文，如果超过最大发包上限还没有收到应答，则会将状态设置为failed
+*/
+#define NUD_INCOMPLETE	0x01//未完成状态，表示正在解析地址，但邻居链路层地址尚未确定
+/*
+对于收到可到达性确认后，即会进入NUD_REACHABLE,当进入NUD_REACHABLE状态。当进入NUD_REACHABLE后，即会启动个定时器，当定时器到时前，该邻居协议没有
+被使用过，就会将邻居项的状态转换为NUD_STALE
+*/
+#define NUD_REACHABLE	0x02//可达状态，表示地址解析成功，该邻居可达
+/*
+对于进入NUD_STALE状态的邻居项，即会启动一个定时器，如果在定时器到时前，有数据需要发送，则直接将数据包发送出去，并将状态设置为NUD_DELAY;
+如果在定时器到时，没有数据需要发送，且该邻居项的引用计数为1，则会通过垃圾回收机制，释放该邻居项对应的缓存
+*/
+#define NUD_STALE	0x04//失效状态: 表示可达时间耗尽，未确定邻居是否可达
+/*
+处于NUD_DELAY状态的邻居项，如果在定时器到时后，没有收到可到达性确认，则会进入NUD_PROBE状态，如果在定时器到达之前，收到可到达性确认，
+则会进入NUD REACHABLE (在该状态下的邻居项不会发送solicit请求，而只是等待可到达性应答。主要包括对以前的solicit请求的应答或者收到一个对于本设备以前发送的一个数据包的应答)
+*/
+#define NUD_DELAY	0x08//延迟状态，表示未确定邻居是否可达。DELAY状态不是一个稳定的状态，而是一个延时等待状态
+/*
+处于NUD_PROBE状态的邻居项，会发送arp solicit请求，并启动一个定时器。如果在定时器到时前，收到可到达性确认，则进入NUD_REACHABLE; 如果在定时器到时后，没有收到可到达性确认:
+	a)没有超过最大发包次数时，则继续发送solicit请求，并启动定时器
+	b)如果超过最大发包次数，则将邻居项状态设置为failed
+*/
+#define NUD_PROBE	0x10//探测状态: 节点会向处FPROBE状态的领居号续发送VS报X
+#define NUD_FAILED	0x20//失败垃圾回收
 
 /* Dummy states */
+//以下状态 无需邻居探测
 #define NUD_NOARP	0x40
 #define NUD_PERMANENT	0x80
 #define NUD_NONE	0x00

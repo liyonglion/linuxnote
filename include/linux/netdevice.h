@@ -225,7 +225,7 @@ struct hh_cache
  * They are mostly read, but hh_refcnt may be changed quite frequently,
  * incurring cache line ping pongs.
  */
-	__be16		hh_type ____cacheline_aligned_in_smp;
+	__be16		hh_type ____cacheline_aligned_in_smp;//硬件类型，例如eth的是ETH_P_802_3
 					/* protocol identifier, f.e ETH_P_IP
                                          *  NOTE:  For VLANs, this will be the
                                          *  encapuslated type. --BLG
@@ -240,7 +240,7 @@ struct hh_cache
 	(HH_DATA_MOD - (((__len - 1) & (HH_DATA_MOD - 1)) + 1))
 #define HH_DATA_ALIGN(__len) \
 	(((__len)+(HH_DATA_MOD-1))&~(HH_DATA_MOD - 1))
-	unsigned long	hh_data[HH_DATA_ALIGN(LL_MAX_HEADER) / sizeof(long)];
+	unsigned long	hh_data[HH_DATA_ALIGN(LL_MAX_HEADER) / sizeof(long)];//二层协议头
 };
 
 /* Reserve HH_DATA_MOD byte aligned hard_header_len, but at least that much.

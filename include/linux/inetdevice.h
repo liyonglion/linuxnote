@@ -35,8 +35,8 @@ struct in_device
 	unsigned char		mr_ifc_count;
 	struct timer_list	mr_gq_timer;	/* general query timer 通用查询计时器 */
 	struct timer_list	mr_ifc_timer;	/* interface change timer 接口改变的计时器*/
-
-	struct neigh_parms	*arp_parms;
+	//对每个设备上邻居协议行为进行调整的一组参数。由于在大部分接口上可以启动多个协议（例如，IPv4 和 IPv6)，所以一个 net_device 结构可以关联多个 neigh_parms 结构。
+	struct neigh_parms	*arp_parms;//arp表相关参数
 	struct ipv4_devconf	cnf;
 	struct rcu_head		rcu_head;
 };
