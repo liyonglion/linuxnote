@@ -125,29 +125,35 @@ struct sk_buff_head {
 struct sk_buff;
 
 /* To allow 64K frame to be packed as single skb without frag_list */
-#define MAX_SKB_FRAGS (65536/PAGE_SIZE + 2)
+#define MAX_SKB_FRAGS (65536/PAGE_SIZE + 2)//分散数据块的最大个数
 
 typedef struct skb_frag_struct skb_frag_t;
 
-struct skb_frag_struct {
-	struct page *page;
-	__u32 page_offset;
-	__u32 size;
+struct skb_frag_struct {//分散数据块结构
+	struct page *page;//指向保存分散数据块的页面
+	__u32 page_offset;//分散数据块在页面的偏移位置(开始位置)
+	__u32 size;//分散数据块的长度
 };
 
 /* This data is invariant across clones and lives at
  * the end of the header data, ie. at skb->end.
+ 	共享结构 skb_shared_info 的意义虽然名称上是共享的意思，但是这个结构的作用并不是为了共享,它记载着分散数据块和分段数据包的信息。
+ 分散集中数据块(简称分散数据块)是指以分散集中的 DMA 方式存放数据块,被称为scatter -gather DMA。
+ 我们知道 DMA 使网络设备可以直接存取内存普通数据块 DMA方式(Block DMA)要求内存的物理地址必需连续;而分散集中 DMA方式正好相反，
+ 可以将数据块分散到物理地址不连续的内存中,并使用链表的方法指向存放数据块的内存。如果网络设备支持分散集中 DMA 方式,就可以大大提高发送效率
+ 	共享结构的frags数组是 skb_frag_t 结构它指出分散数据块在内存的具体页面(内核管理以页为单位,每页为 4 KB大小)以及在页面的偏移位置,
+ 但是所在页面的剩余空间可以同时被其他共享结构的分散数据块使用。
  */
-struct skb_shared_info {
-	atomic_t	dataref;
-	unsigned short	nr_frags;
-	unsigned short	gso_size;
+struct skb_shared_info {//用于支持IP数据分片和TCP数据分段。
+	atomic_t	dataref;//使用计数
+	unsigned short	nr_frags;//分散的数据块数。数据包被分割的数据片的计数，描述了一个数据包最终被分成了多少个数据片，这个域是支持IP分片使用的。
+	unsigned short	gso_size;//分段数据包的大小
 	/* Warning: this field is not always filled in (UFO)! */
-	unsigned short	gso_segs;
-	unsigned short  gso_type;
-	__be32          ip6_frag_id;
-	struct sk_buff	*frag_list;
-	skb_frag_t	frags[MAX_SKB_FRAGS];
+	unsigned short	gso_segs;//分段数据包的个数
+	unsigned short  gso_type;//分段数据包的类型
+	__be32          ip6_frag_id;//IPV6使用
+	struct sk_buff	*frag_list;//分段数据包队列
+	skb_frag_t	frags[MAX_SKB_FRAGS];//分散数据块队列（数组）。
 };
 
 /* We divide dataref into two halves.  The higher 16 bits hold references
@@ -910,11 +916,11 @@ static inline unsigned char *pskb_pull(struct sk_buff *skb, unsigned int len)
 
 static inline int pskb_may_pull(struct sk_buff *skb, unsigned int len)
 {
-	if (likely(len <= skb_headlen(skb)))
+	if (likely(len <= skb_headlen(skb)))//数据包头部长度大于TCP头部长度，正确
 		return 1;
-	if (unlikely(len > skb->len))
+	if (unlikely(len > skb->len))//如果数据块长度小于TCP头部长度，错误
 		return 0;
-	return __pskb_pull_tail(skb, len-skb_headlen(skb)) != NULL;
+	return __pskb_pull_tail(skb, len-skb_headlen(skb)) != NULL;//如果数据包头部长度小于TCP头部长度就调整头部长度
 }
 
 /**

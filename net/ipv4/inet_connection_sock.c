@@ -185,7 +185,7 @@ EXPORT_SYMBOL_GPL(inet_csk_get_port);
 static int inet_csk_wait_for_connect(struct sock *sk, long timeo)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
-	DEFINE_WAIT(wait);
+	DEFINE_WAIT(wait);//声明当前进程的等待队列
 	int err;
 
 	/*
@@ -202,27 +202,27 @@ static int inet_csk_wait_for_connect(struct sock *sk, long timeo)
 	 * our exclusiveness temporarily when we get woken up without
 	 * having to remove and re-insert us on the wait queue.
 	 */
-	for (;;) {
+	for (;;) {//循环睡眠，直到时间用完或者有连接请求到来
 		prepare_to_wait_exclusive(sk->sk_sleep, &wait,
-					  TASK_INTERRUPTIBLE);
-		release_sock(sk);
+					  TASK_INTERRUPTIBLE);//将当前进程的等待队列项目加入等待队列
+		release_sock(sk);//解锁，并唤醒sock锁上的其他进程
 		if (reqsk_queue_empty(&icsk->icsk_accept_queue))
-			timeo = schedule_timeout(timeo);
-		lock_sock(sk);
+			timeo = schedule_timeout(timeo);//定时睡眠
+		lock_sock(sk);//加锁，被占用则睡眠，等待被唤醒
 		err = 0;
-		if (!reqsk_queue_empty(&icsk->icsk_accept_queue))
+		if (!reqsk_queue_empty(&icsk->icsk_accept_queue))//是否有连接请求到来
 			break;
 		err = -EINVAL;
 		if (sk->sk_state != TCP_LISTEN)
 			break;
 		err = sock_intr_errno(timeo);
-		if (signal_pending(current))
+		if (signal_pending(current))//是否有信号等待要处理
 			break;
 		err = -EAGAIN;
 		if (!timeo)
 			break;
 	}
-	finish_wait(sk->sk_sleep, &wait);
+	finish_wait(sk->sk_sleep, &wait);//从等待队列中摘链
 	return err;
 }
 
@@ -244,20 +244,20 @@ struct sock *inet_csk_accept(struct sock *sk, int flags, int *err)
 	if (sk->sk_state != TCP_LISTEN)
 		goto out_err;
 
-	/* Find already established connection */
+	/* Find already established connection 检查全连接是否为空*/
 	if (reqsk_queue_empty(&icsk->icsk_accept_queue)) {
-		long timeo = sock_rcvtimeo(sk, flags & O_NONBLOCK);
+		long timeo = sock_rcvtimeo(sk, flags & O_NONBLOCK);//确定睡眠时间
 
 		/* If this is a non blocking socket don't sleep */
 		error = -EAGAIN;
 		if (!timeo)
 			goto out_err;
 
-		error = inet_csk_wait_for_connect(sk, timeo);
+		error = inet_csk_wait_for_connect(sk, timeo);//进入循环睡眠等待连接到来
 		if (error)
 			goto out_err;
 	}
-
+	//在全连接队列中获取客户端sock
 	newsk = reqsk_queue_get_child(&icsk->icsk_accept_queue, sk);
 	BUG_TRAP(newsk->sk_state != TCP_SYN_RECV);
 out:
@@ -370,27 +370,27 @@ struct request_sock *inet_csk_search_req(const struct sock *sk,
 					 const __be16 rport, const __be32 raddr,
 					 const __be32 laddr)
 {
-	const struct inet_connection_sock *icsk = inet_csk(sk);
-	struct listen_sock *lopt = icsk->icsk_accept_queue.listen_opt;
+	const struct inet_connection_sock *icsk = inet_csk(sk);//获取连接结构
+	struct listen_sock *lopt = icsk->icsk_accept_queue.listen_opt;//获取半连接列队
 	struct request_sock *req, **prev;
-
+	//在半连接队列中寻找连接请求结构
 	for (prev = &lopt->syn_table[inet_synq_hash(raddr, rport, lopt->hash_rnd,
 						    lopt->nr_table_entries)];
 	     (req = *prev) != NULL;
 	     prev = &req->dl_next) {
-		const struct inet_request_sock *ireq = inet_rsk(req);
+		const struct inet_request_sock *ireq = inet_rsk(req);//获取连接请求结构
 
-		if (ireq->rmt_port == rport &&
-		    ireq->rmt_addr == raddr &&
-		    ireq->loc_addr == laddr &&
-		    AF_INET_FAMILY(req->rsk_ops->family)) {
+		if (ireq->rmt_port == rport &&//对比源端口
+		    ireq->rmt_addr == raddr &&//对比源地址
+		    ireq->loc_addr == laddr &&//对比目标地址
+		    AF_INET_FAMILY(req->rsk_ops->family)) {//对比协议族
 			BUG_TRAP(!req->sk);
 			*prevp = prev;
 			break;
 		}
 	}
 
-	return req;
+	return req;//返回找到的连接请求结构
 }
 
 EXPORT_SYMBOL_GPL(inet_csk_search_req);
@@ -398,13 +398,13 @@ EXPORT_SYMBOL_GPL(inet_csk_search_req);
 void inet_csk_reqsk_queue_hash_add(struct sock *sk, struct request_sock *req,
 				   unsigned long timeout)
 {
-	struct inet_connection_sock *icsk = inet_csk(sk);
-	struct listen_sock *lopt = icsk->icsk_accept_queue.listen_opt;
+	struct inet_connection_sock *icsk = inet_csk(sk);//获取连接结构
+	struct listen_sock *lopt = icsk->icsk_accept_queue.listen_opt;//获取半连接队列
 	const u32 h = inet_synq_hash(inet_rsk(req)->rmt_addr, inet_rsk(req)->rmt_port,
-				     lopt->hash_rnd, lopt->nr_table_entries);
+				     lopt->hash_rnd, lopt->nr_table_entries);//计算hash值
 
-	reqsk_queue_hash_req(&icsk->icsk_accept_queue, h, req, timeout);
-	inet_csk_reqsk_queue_added(sk, timeout);
+	reqsk_queue_hash_req(&icsk->icsk_accept_queue, h, req, timeout);//加入半连接队列中
+	inet_csk_reqsk_queue_added(sk, timeout);//递增监听结构计数器，重置sock定时器
 }
 
 /* Only thing we need from tcp.h */
@@ -504,12 +504,12 @@ EXPORT_SYMBOL_GPL(inet_csk_reqsk_queue_prune);
 struct sock *inet_csk_clone(struct sock *sk, const struct request_sock *req,
 			    const gfp_t priority)
 {
-	struct sock *newsk = sk_clone(sk, priority);
+	struct sock *newsk = sk_clone(sk, priority);//克隆成功
 
 	if (newsk != NULL) {
 		struct inet_connection_sock *newicsk = inet_csk(newsk);
 
-		newsk->sk_state = TCP_SYN_RECV;
+		newsk->sk_state = TCP_SYN_RECV;//修改连接状态
 		newicsk->icsk_bind_hash = NULL;
 
 		inet_sk(newsk)->dport = inet_rsk(req)->rmt_port;
@@ -562,9 +562,9 @@ EXPORT_SYMBOL(inet_csk_destroy_sock);
 
 int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 {
-	struct inet_sock *inet = inet_sk(sk);
-	struct inet_connection_sock *icsk = inet_csk(sk);
-	int rc = reqsk_queue_alloc(&icsk->icsk_accept_queue, nr_table_entries);
+	struct inet_sock *inet = inet_sk(sk);//获取INET的sock指针
+	struct inet_connection_sock *icsk = inet_csk(sk);//获取INET连接结构指针
+	int rc = reqsk_queue_alloc(&icsk->icsk_accept_queue, nr_table_entries);//初始化连接请求队列(全连接、半连接队列)。nr_table_entries就是listening队列的大小,等于半连接队列的大小
 
 	if (rc != 0)
 		return rc;
@@ -578,16 +578,16 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 	 * It is OK, because this socket enters to hash table only
 	 * after validation is complete.
 	 */
-	sk->sk_state = TCP_LISTEN;
-	if (!sk->sk_prot->get_port(sk, inet->num)) {
+	sk->sk_state = TCP_LISTEN;//将状态设置为LISTEN
+	if (!sk->sk_prot->get_port(sk, inet->num)) {//该inet->num端口是否被占用，没有被占用直接绑定。此处get_port 为inet_csk_get_port函数
 		inet->sport = htons(inet->num);
 
 		sk_dst_reset(sk);
-		sk->sk_prot->hash(sk);
+		sk->sk_prot->hash(sk);//将该套接字加入到tcp_hashinfo->listening_hash表中。hash为inet_hash()函数
 
 		return 0;
 	}
-
+	//走到这个位置，说明端口号被占用
 	sk->sk_state = TCP_CLOSE;
 	__reqsk_queue_destroy(&icsk->icsk_accept_queue);
 	return -EADDRINUSE;

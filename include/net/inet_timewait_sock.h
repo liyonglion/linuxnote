@@ -100,7 +100,7 @@ struct inet_bind_bucket;
  * problems of sockets in such a state on heavily loaded servers, but
  * without violating the protocol specification.
  */
-struct inet_timewait_sock {
+struct inet_timewait_sock {//TIME_WAIT状态下的sock描述，主要用于面向连接协议，考虑到内存影响单独使用一个结构体，而不是使用sock，sock和inet_timewait_sock的公共部分就是sock_common
 	/*
 	 * Now struct sock also uses sock_common, so please just
 	 * don't add nothing before this first member (__tw_common) --acme
@@ -116,23 +116,28 @@ struct inet_timewait_sock {
 #define tw_hash			__tw_common.skc_hash
 #define tw_prot			__tw_common.skc_prot
 #define tw_net			__tw_common.skc_net
-	int			tw_timeout;
+	int			tw_timeout;//tw状态的超时时间
+	//这个用来标记我们是正常进入tw还是说由于超时等一系列原因进入(比如超时等一系列原因)  
 	volatile unsigned char	tw_substate;
 	/* 3 bits hole, try to pack */
+	//和tcp option中的接收窗口比例类似 
 	unsigned char		tw_rcv_wscale;
 	/* Socket demultiplex comparisons on incoming packets. */
 	/* these five are in inet_sock */
+	//也就是标示sock的4个域，源目的端口和地址
 	__be16			tw_sport;
 	__be32			tw_daddr __attribute__((aligned(INET_TIMEWAIT_ADDRCMP_ALIGN_BYTES)));
 	__be32			tw_rcv_saddr;
 	__be16			tw_dport;
-	__u16			tw_num;
+	__u16			tw_num;//本地端口
 	/* And these are ours. */
 	__u8			tw_ipv6only:1;
 	/* 15 bits hole, try to pack */
 	__u16			tw_ipv6_offset;
 	unsigned long		tw_ttd;
+	//链接到端口的hash表中。  
 	struct inet_bind_bucket	*tw_tb;
+	//链接到全局的tw状态hash表中。  
 	struct hlist_node	tw_death_node;
 };
 

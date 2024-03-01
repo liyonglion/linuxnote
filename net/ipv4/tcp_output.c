@@ -179,7 +179,7 @@ static inline void tcp_event_ack_sent(struct sock *sk, unsigned int pkts)
 void tcp_select_initial_window(int __space, __u32 mss,
 			       __u32 *rcv_wnd, __u32 *window_clamp,
 			       int wscale_ok, __u8 *rcv_wscale)
-{
+{//初始化滑动窗口
 	unsigned int space = (__space < 0 ? 0 : __space);
 
 	/* If no clamp set the clamp to the max possible scaled window */
@@ -341,9 +341,9 @@ static void tcp_init_nondata_skb(struct sk_buff *skb, u32 seq, u8 flags)
 	skb_shinfo(skb)->gso_size = 0;
 	skb_shinfo(skb)->gso_type = 0;
 
-	TCP_SKB_CB(skb)->seq = seq;
+	TCP_SKB_CB(skb)->seq = seq;//保存计算出来的seq
 	if (flags & (TCPCB_FLAG_SYN | TCPCB_FLAG_FIN))
-		seq++;
+		seq++;//对于SYN/FIN,seq号加1
 	TCP_SKB_CB(skb)->end_seq = seq;
 }
 
@@ -901,11 +901,12 @@ void tcp_mtup_init(struct sock *sk)
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct inet_connection_sock *icsk = inet_csk(sk);
 
-	icsk->icsk_mtup.enabled = sysctl_tcp_mtu_probing > 1;
+	icsk->icsk_mtup.enabled = sysctl_tcp_mtu_probing > 1;//MTU启动标志位
 	icsk->icsk_mtup.search_high = tp->rx_opt.mss_clamp + sizeof(struct tcphdr) +
-			       icsk->icsk_af_ops->net_header_len;
+			       icsk->icsk_af_ops->net_header_len;//MTU的搜索范围，上限与下限。上线为mss+tcp头头+网络头部
+	//根据MSS计算MTU			   
 	icsk->icsk_mtup.search_low = tcp_mss_to_mtu(sk, sysctl_tcp_base_mss);
-	icsk->icsk_mtup.probe_size = 0;
+	icsk->icsk_mtup.probe_size = 0;//当前
 }
 
 /* Bound MSS / TSO packet size with the half of the window */
@@ -945,17 +946,17 @@ unsigned int tcp_sync_mss(struct sock *sk, u32 pmtu)
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	int mss_now;
 
-	if (icsk->icsk_mtup.search_high > pmtu)
-		icsk->icsk_mtup.search_high = pmtu;
+	if (icsk->icsk_mtup.search_high > pmtu)//检查MTU最大值是否超过指定的MTU值
+		icsk->icsk_mtup.search_high = pmtu;//修改为指定的MTU值
 
-	mss_now = tcp_mtu_to_mss(sk, pmtu);
-	mss_now = tcp_bound_to_half_wnd(tp, mss_now);
+	mss_now = tcp_mtu_to_mss(sk, pmtu);//根据mtu计算mss
+	mss_now = tcp_bound_to_half_wnd(tp, mss_now);//调整MSS为窗口半值
 
 	/* And store cached results */
-	icsk->icsk_pmtu_cookie = pmtu;
+	icsk->icsk_pmtu_cookie = pmtu;//记录MTU值
 	if (icsk->icsk_mtup.enabled)
-		mss_now = min(mss_now, tcp_mtu_to_mss(sk, icsk->icsk_mtup.search_low));
-	tp->mss_cache = mss_now;
+		mss_now = min(mss_now, tcp_mtu_to_mss(sk, icsk->icsk_mtup.search_low));//根据MTU最小值调整MSS
+	tp->mss_cache = mss_now;//记录MSS值
 
 	return mss_now;
 }
@@ -2186,20 +2187,20 @@ struct sk_buff *tcp_make_synack(struct sock *sk, struct dst_entry *dst,
 	__u8 *md5_hash_location;
 #endif
 
-	skb = sock_wmalloc(sk, MAX_TCP_HEADER + 15, 1, GFP_ATOMIC);
+	skb = sock_wmalloc(sk, MAX_TCP_HEADER + 15, 1, GFP_ATOMIC);//分配数据包结构，数据块按照16字节对齐，按照全部头部的长度进行分配
 	if (skb == NULL)
 		return NULL;
 
 	/* Reserve space for headers. */
 	skb_reserve(skb, MAX_TCP_HEADER);
 
-	skb->dst = dst_clone(dst);
+	skb->dst = dst_clone(dst);//拷贝一个缓存路由项并设置到skb->dst
 
 	tcp_header_size = (sizeof(struct tcphdr) + TCPOLEN_MSS +
 			   (ireq->tstamp_ok ? TCPOLEN_TSTAMP_ALIGNED : 0) +
 			   (ireq->wscale_ok ? TCPOLEN_WSCALE_ALIGNED : 0) +
 			   /* SACK_PERM is in the place of NOP NOP of TS */
-			   ((ireq->sack_ok && !ireq->tstamp_ok) ? TCPOLEN_SACKPERM_ALIGNED : 0));
+			   ((ireq->sack_ok && !ireq->tstamp_ok) ? TCPOLEN_SACKPERM_ALIGNED : 0));//计算tcp头部大小包括选项部分
 
 #ifdef CONFIG_TCP_MD5SIG
 	/* Are we doing MD5 on this segment? If so - make room for it */
@@ -2207,29 +2208,29 @@ struct sk_buff *tcp_make_synack(struct sock *sk, struct dst_entry *dst,
 	if (md5)
 		tcp_header_size += TCPOLEN_MD5SIG_ALIGNED;
 #endif
-	skb_push(skb, tcp_header_size);
-	skb_reset_transport_header(skb);
+	skb_push(skb, tcp_header_size);//将data指针指向TCP头部位置
+	skb_reset_transport_header(skb);//保留TCP头部位置，将sk->transport_header 指向tcp头部位置
 
-	th = tcp_hdr(skb);
-	memset(th, 0, sizeof(struct tcphdr));
-	th->syn = 1;
-	th->ack = 1;
-	TCP_ECN_make_synack(req, th);
-	th->source = inet_sk(sk)->sport;
-	th->dest = ireq->rmt_port;
+	th = tcp_hdr(skb);//获取tcp头部指针
+	memset(th, 0, sizeof(struct tcphdr));//清空tcp头部
+	th->syn = 1;//设置sync标志
+	th->ack = 1;//设置ack表示
+	TCP_ECN_make_synack(req, th);//设置踢醒标志
+	th->source = inet_sk(sk)->sport;//记录源端口
+	th->dest = ireq->rmt_port;//记录目标端口
 	/* Setting of flags are superfluous here for callers (and ECE is
 	 * not even correctly set)
 	 */
 	tcp_init_nondata_skb(skb, tcp_rsk(req)->snt_isn,
 			     TCPCB_FLAG_SYN | TCPCB_FLAG_ACK);
-	th->seq = htonl(TCP_SKB_CB(skb)->seq);
-	th->ack_seq = htonl(tcp_rsk(req)->rcv_isn + 1);
-	if (req->rcv_wnd == 0) { /* ignored for retransmitted syns */
+	th->seq = htonl(TCP_SKB_CB(skb)->seq);//设置序列号，在tcp_init_nondata_skb函数里面，已经将tcp_rsk(req)->snt_isn赋值给了TCP_SKB_CB(skb)->seq
+	th->ack_seq = htonl(tcp_rsk(req)->rcv_isn + 1);//设置包ack号
+	if (req->rcv_wnd == 0) { /* ignored for retransmitted syns 此处rcv_wnd一定为0 */
 		__u8 rcv_wscale;
 		/* Set this up on the first call only */
-		req->window_clamp = tp->window_clamp ? : dst_metric(dst, RTAX_WINDOW);
+		req->window_clamp = tp->window_clamp ? : dst_metric(dst, RTAX_WINDOW);//从路由项中获取发送窗口大小
 		/* tcp_full_space because it is guaranteed to be the first packet */
-		tcp_select_initial_window(tcp_full_space(sk),
+		tcp_select_initial_window(tcp_full_space(sk),//FIXME:待分析
 			dst_metric(dst, RTAX_ADVMSS) - (ireq->tstamp_ok ? TCPOLEN_TSTAMP_ALIGNED : 0),
 			&req->rcv_wnd,
 			&req->window_clamp,
@@ -2245,7 +2246,7 @@ struct sk_buff *tcp_make_synack(struct sock *sk, struct dst_entry *dst,
 		TCP_SKB_CB(skb)->when = cookie_init_timestamp(req);
 	else
 #endif
-	TCP_SKB_CB(skb)->when = tcp_time_stamp;
+	TCP_SKB_CB(skb)->when = tcp_time_stamp;//记录当前包发送时间戳，用于计算rtt
 	tcp_syn_build_options((__be32 *)(th + 1), dst_metric(dst, RTAX_ADVMSS), ireq->tstamp_ok,
 			      ireq->sack_ok, ireq->wscale_ok, ireq->rcv_wscale,
 			      TCP_SKB_CB(skb)->when,
@@ -2287,7 +2288,7 @@ static void tcp_connect_init(struct sock *sk)
 	 * See tcp_input.c:tcp_rcv_state_process case TCP_SYN_SENT.
 	 */
 	tp->tcp_header_len = sizeof(struct tcphdr) +
-		(sysctl_tcp_timestamps ? TCPOLEN_TSTAMP_ALIGNED : 0);
+		(sysctl_tcp_timestamps ? TCPOLEN_TSTAMP_ALIGNED : 0);//记录头部长度
 
 #ifdef CONFIG_TCP_MD5SIG
 	if (tp->af_specific->md5_lookup(sk, sk) != NULL)
@@ -2296,39 +2297,39 @@ static void tcp_connect_init(struct sock *sk)
 
 	/* If user gave his TCP_MAXSEG, record it to clamp */
 	if (tp->rx_opt.user_mss)
-		tp->rx_opt.mss_clamp = tp->rx_opt.user_mss;
-	tp->max_window = 0;
-	tcp_mtup_init(sk);
-	tcp_sync_mss(sk, dst_mtu(dst));
+		tp->rx_opt.mss_clamp = tp->rx_opt.user_mss;//记录指定的mss值
+	tp->max_window = 0;//初始化最大窗口值
+	tcp_mtup_init(sk);//初始化MTU内容
+	tcp_sync_mss(sk, dst_mtu(dst));//确定同步发送的mss
 
 	if (!tp->window_clamp)
-		tp->window_clamp = dst_metric(dst, RTAX_WINDOW);
-	tp->advmss = dst_metric(dst, RTAX_ADVMSS);
-	tcp_initialize_rcv_mss(sk);
+		tp->window_clamp = dst_metric(dst, RTAX_WINDOW);//记录窗口值
+	tp->advmss = dst_metric(dst, RTAX_ADVMSS);//记录对外宣布的MSS值
+	tcp_initialize_rcv_mss(sk);//初始化接收的MSS值
 
 	tcp_select_initial_window(tcp_full_space(sk),
 				  tp->advmss - (tp->rx_opt.ts_recent_stamp ? tp->tcp_header_len - sizeof(struct tcphdr) : 0),
 				  &tp->rcv_wnd,
 				  &tp->window_clamp,
 				  sysctl_tcp_window_scaling,
-				  &rcv_wscale);
+				  &rcv_wscale);//确定窗口比例和窗口值
 
-	tp->rx_opt.rcv_wscale = rcv_wscale;
-	tp->rcv_ssthresh = tp->rcv_wnd;
+	tp->rx_opt.rcv_wscale = rcv_wscale;//设置接收方的发送窗口比例
+	tp->rcv_ssthresh = tp->rcv_wnd;//记录当前使用的窗口
 
 	sk->sk_err = 0;
-	sock_reset_flag(sk, SOCK_DONE);
-	tp->snd_wnd = 0;
-	tcp_init_wl(tp, tp->write_seq, 0);
-	tp->snd_una = tp->write_seq;
-	tp->snd_sml = tp->write_seq;
-	tp->rcv_nxt = 0;
-	tp->rcv_wup = 0;
-	tp->copied_seq = 0;
+	sock_reset_flag(sk, SOCK_DONE);//复位标志位
+	tp->snd_wnd = 0;//期望接收的窗口
+	tcp_init_wl(tp, tp->write_seq, 0);//记录发送序号
+	tp->snd_una = tp->write_seq;//应答时的第一个字节
+	tp->snd_sml = tp->write_seq;//最后一个字节
+	tp->rcv_nxt = 0;//下一个要接收的
+	tp->rcv_wup = 0;//窗口更新时最后一次rcv_nxt
+	tp->copied_seq = 0;//未读的数据头
 
-	inet_csk(sk)->icsk_rto = TCP_TIMEOUT_INIT;
-	inet_csk(sk)->icsk_retransmits = 0;
-	tcp_clear_retrans(tp);
+	inet_csk(sk)->icsk_rto = TCP_TIMEOUT_INIT;//重发时间限制
+	inet_csk(sk)->icsk_retransmits = 0;//重发数目
+	tcp_clear_retrans(tp);//复位重发计数器
 }
 
 /*
@@ -2339,39 +2340,40 @@ int tcp_connect(struct sock *sk)
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct sk_buff *buff;
 
-	tcp_connect_init(sk);
-
+	tcp_connect_init(sk);//初始化tcp_sock结构内容
+	//为syn准备数据包
 	buff = alloc_skb_fclone(MAX_TCP_HEADER + 15, sk->sk_allocation);
 	if (unlikely(buff == NULL))
 		return -ENOBUFS;
 
 	/* Reserve space for headers. */
-	skb_reserve(buff, MAX_TCP_HEADER);
+	skb_reserve(buff, MAX_TCP_HEADER);//在缓冲块中开辟TCP头部空间
 
-	tp->snd_nxt = tp->write_seq;
+	tp->snd_nxt = tp->write_seq;//记录发送序列号
+	//构建SYN非数据类型的通用控制位，并自增应答序号
 	tcp_init_nondata_skb(buff, tp->write_seq++, TCPCB_FLAG_SYN);
-	TCP_ECN_send_syn(sk, buff);
+	TCP_ECN_send_syn(sk, buff);//设置ECN拥塞标志
 
 	/* Send it off. */
-	TCP_SKB_CB(buff)->when = tcp_time_stamp;
-	tp->retrans_stamp = TCP_SKB_CB(buff)->when;
-	skb_header_release(buff);
-	__tcp_add_write_queue_tail(sk, buff);
-	sk->sk_wmem_queued += buff->truesize;
-	sk_mem_charge(sk, buff->truesize);
-	tp->packets_out += tcp_skb_pcount(buff);
-	tcp_transmit_skb(sk, buff, 1, GFP_KERNEL);
+	TCP_SKB_CB(buff)->when = tcp_time_stamp;//控制结构中记录发送时间，用于计算rtt
+	tp->retrans_stamp = TCP_SKB_CB(buff)->when;//初始化重发时间
+	skb_header_release(buff);//设置没有头部nohdr标志位
+	__tcp_add_write_queue_tail(sk, buff);//将数据包放入发送队列尾部
+	sk->sk_wmem_queued += buff->truesize;//调整队列长度
+	sk_mem_charge(sk, buff->truesize);//调整预分配长度
+	tp->packets_out += tcp_skb_pcount(buff);//调整“飞行中”的数据包计数器
+	tcp_transmit_skb(sk, buff, 1, GFP_KERNEL);//发送数据包
 
 	/* We change tp->snd_nxt after the tcp_transmit_skb() call
 	 * in order to make this packet get counted in tcpOutSegs.
 	 */
-	tp->snd_nxt = tp->write_seq;
-	tp->pushed_seq = tp->write_seq;
+	tp->snd_nxt = tp->write_seq;//记录下一个发送序号
+	tp->pushed_seq = tp->write_seq;//上一次push的序号
 	TCP_INC_STATS(TCP_MIB_ACTIVEOPENS);
 
 	/* Timer for repeating the SYN until an answer. */
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-				  inet_csk(sk)->icsk_rto, TCP_RTO_MAX);
+				  inet_csk(sk)->icsk_rto, TCP_RTO_MAX);//设置重发SYN的定时器
 	return 0;
 }
 

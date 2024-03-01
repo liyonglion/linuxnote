@@ -199,46 +199,47 @@ int ip_call_ra_chain(struct sk_buff *skb)
 
 static int ip_local_deliver_finish(struct sk_buff *skb)
 {
-	struct net *net = dev_net(skb->dev);
+	struct net *net = dev_net(skb->dev);//获取网络命名空间结构指针
 
-	__skb_pull(skb, ip_hdrlen(skb));
+	__skb_pull(skb, ip_hdrlen(skb));//调整数据块起始地址跳过IP头部
 
 	/* Point into the IP datagram, just past the header. */
-	skb_reset_transport_header(skb);
+	skb_reset_transport_header(skb);//记录TCP传输层的头部位置
 
 	rcu_read_lock();
 	{
-		int protocol = ip_hdr(skb)->protocol;
+		int protocol = ip_hdr(skb)->protocol;//获取IP头部的协议值
 		int hash, raw;
 		struct net_protocol *ipprot;
 
 	resubmit:
-		raw = raw_local_deliver(skb, protocol);
+		raw = raw_local_deliver(skb, protocol);//传递给raw socket处理
 
-		hash = protocol & (MAX_INET_PROTOS - 1);
-		ipprot = rcu_dereference(inet_protos[hash]);
+		hash = protocol & (MAX_INET_PROTOS - 1);//计算hash值
+		ipprot = rcu_dereference(inet_protos[hash]);//获得传输层函数表结构。inet_protos在inet_init中进行注册
+		//检查函数表结构是否存在，验证网卡空间结构
 		if (ipprot != NULL && (net == &init_net || ipprot->netns_ok)) {
 			int ret;
 
-			if (!ipprot->no_policy) {
-				if (!xfrm4_policy_check(NULL, XFRM_POLICY_IN, skb)) {
+			if (!ipprot->no_policy) {//是否需要IP SEC得安全验证
+				if (!xfrm4_policy_check(NULL, XFRM_POLICY_IN, skb)) {//XFRM POLICY验证
 					kfree_skb(skb);
 					goto out;
 				}
-				nf_reset(skb);
+				nf_reset(skb);//于NETFILTER相关，先不关心
 			}
-			ret = ipprot->handler(skb);
+			ret = ipprot->handler(skb);//调用传输层函数表得处理函数
 			if (ret < 0) {
 				protocol = -ret;
 				goto resubmit;
 			}
-			IP_INC_STATS_BH(IPSTATS_MIB_INDELIVERS);
+			IP_INC_STATS_BH(IPSTATS_MIB_INDELIVERS);///proc/net/snmp 中InDelivers递增传递计数
 		} else {
-			if (!raw) {
-				if (xfrm4_policy_check(NULL, XFRM_POLICY_IN, skb)) {
-					IP_INC_STATS_BH(IPSTATS_MIB_INUNKNOWNPROTOS);
+			if (!raw) {//如果raw socket处理失败
+				if (xfrm4_policy_check(NULL, XFRM_POLICY_IN, skb)) {//XFRM POLICY验证通过
+					IP_INC_STATS_BH(IPSTATS_MIB_INUNKNOWNPROTOS);//递增InUnknownProtos计数
 					icmp_send(skb, ICMP_DEST_UNREACH,
-						  ICMP_PROT_UNREACH, 0);
+						  ICMP_PROT_UNREACH, 0);//发送无法到达得ICMP信息
 				}
 			} else
 				IP_INC_STATS_BH(IPSTATS_MIB_INDELIVERS);

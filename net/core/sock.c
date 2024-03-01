@@ -1083,15 +1083,15 @@ EXPORT_SYMBOL_GPL(sk_clone);
 void sk_setup_caps(struct sock *sk, struct dst_entry *dst)
 {
 	__sk_dst_set(sk, dst);
-	sk->sk_route_caps = dst->dev->features;
-	if (sk->sk_route_caps & NETIF_F_GSO)
-		sk->sk_route_caps |= NETIF_F_GSO_SOFTWARE;
-	if (sk_can_gso(sk)) {
+	sk->sk_route_caps = dst->dev->features;//兼容的标志取自设备的特性
+	if (sk->sk_route_caps & NETIF_F_GSO)//是否支持GSO分段
+		sk->sk_route_caps |= NETIF_F_GSO_SOFTWARE;//增加分段标识
+	if (sk_can_gso(sk)) {//支持分段类型
 		if (dst->header_len) {
 			sk->sk_route_caps &= ~NETIF_F_GSO_MASK;
 		} else {
 			sk->sk_route_caps |= NETIF_F_SG | NETIF_F_HW_CSUM;
-			sk->sk_gso_max_size = dst->dev->gso_max_size;
+			sk->sk_gso_max_size = dst->dev->gso_max_size;//记录GSO的分段值
 		}
 	}
 }
@@ -1629,7 +1629,11 @@ static void sock_def_error_report(struct sock *sk)
 	sk_wake_async(sk, SOCK_WAKE_IO, POLL_ERR);
 	read_unlock(&sk->sk_callback_lock);
 }
-
+/*
+它唤醒服务器 sock 结构上的等待进程,即唤醒服务器程序来接收客户端的连接请求,将会从inet csk_wait for_connect()函数中继续进行,
+从而使服务器程序接收客户端的连接请求。
+如果是异步接收的服务程序进程,则 sk_wake_async()函数将发送信号唤醒服务器程序进程，让它及时接收连接请求。
+*/
 static void sock_def_readable(struct sock *sk, int len)
 {
 	read_lock(&sk->sk_callback_lock);

@@ -37,19 +37,19 @@ int sysctl_max_syn_backlog = 256;
 int reqsk_queue_alloc(struct request_sock_queue *queue,
 		      unsigned int nr_table_entries)
 {
-	size_t lopt_size = sizeof(struct listen_sock);
-	struct listen_sock *lopt;
-
-	nr_table_entries = min_t(u32, nr_table_entries, sysctl_max_syn_backlog);
-	nr_table_entries = max_t(u32, nr_table_entries, 8);
-	nr_table_entries = roundup_pow_of_two(nr_table_entries + 1);
-	lopt_size += nr_table_entries * sizeof(struct request_sock *);
-	if (lopt_size > PAGE_SIZE)
+	size_t lopt_size = sizeof(struct listen_sock);//获取监听结构的长度
+	struct listen_sock *lopt;//监听结构变量
+	//计算半连接队列的大小
+	nr_table_entries = min_t(u32, nr_table_entries, sysctl_max_syn_backlog);//不能超过sysctl_max_syn_backlog
+	nr_table_entries = max_t(u32, nr_table_entries, 8);//最小不能小于8
+	nr_table_entries = roundup_pow_of_two(nr_table_entries + 1);//调整最接近成2的幂次
+	lopt_size += nr_table_entries * sizeof(struct request_sock *);//计算半连接队列的大小
+	if (lopt_size > PAGE_SIZE)//大于一页大小
 		lopt = __vmalloc(lopt_size,
 			GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO,
 			PAGE_KERNEL);
 	else
-		lopt = kzalloc(lopt_size, GFP_KERNEL);
+		lopt = kzalloc(lopt_size, GFP_KERNEL);//
 	if (lopt == NULL)
 		return -ENOMEM;
 
@@ -59,11 +59,11 @@ int reqsk_queue_alloc(struct request_sock_queue *queue,
 
 	get_random_bytes(&lopt->hash_rnd, sizeof(lopt->hash_rnd));
 	rwlock_init(&queue->syn_wait_lock);
-	queue->rskq_accept_head = NULL;
+	queue->rskq_accept_head = NULL;//全连接队列初始化
 	lopt->nr_table_entries = nr_table_entries;
 
 	write_lock_bh(&queue->syn_wait_lock);
-	queue->listen_opt = lopt;
+	queue->listen_opt = lopt;//赋值半连接队列。半连接队列并没有限制大小，nr_table_entries为hash桶的大小，每个桶下面还有链表
 	write_unlock_bh(&queue->syn_wait_lock);
 
 	return 0;

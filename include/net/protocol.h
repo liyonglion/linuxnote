@@ -33,14 +33,14 @@
 
 
 /* This is used to register protocols. */
-struct net_protocol {
-	int			(*handler)(struct sk_buff *skb);
-	void			(*err_handler)(struct sk_buff *skb, u32 info);
-	int			(*gso_send_check)(struct sk_buff *skb);
+struct net_protocol {//传输层函数表结构
+	int			(*handler)(struct sk_buff *skb);//处理到达数据包得函数指针
+	void			(*err_handler)(struct sk_buff *skb, u32 info);//ICMP得处理函数指针
+	int			(*gso_send_check)(struct sk_buff *skb);//分段数据包校验和函数指针
 	struct sk_buff	       *(*gso_segment)(struct sk_buff *skb,
-					       int features);
-	unsigned int		no_policy:1,
-				netns_ok:1;
+					       int features);//数据包分段处理函数指针
+	unsigned int		no_policy:1,//代表是否需要对IPsec进行校验，1表示不需要
+				netns_ok:1;//是否需要验证网络空间，1表示不需要
 };
 
 #if defined(CONFIG_IPV6) || defined (CONFIG_IPV6_MODULE)

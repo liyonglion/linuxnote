@@ -554,6 +554,7 @@ extern u32	__tcp_select_window(struct sock *sk);
  * 40 bytes on 64-bit machines, if this grows please adjust
  * skbuff.h:skbuff->cb[xxx] size appropriately.
  */
+//tcp数据包的控制块,用来保存tcp数据包的头部信息,以及tcp数据包的序列号,以及tcp数据包的发送时间戳
 struct tcp_skb_cb {
 	union {
 		struct inet_skb_parm	h4;
@@ -561,10 +562,10 @@ struct tcp_skb_cb {
 		struct inet6_skb_parm	h6;
 #endif
 	} header;	/* For incoming frames		*/
-	__u32		seq;		/* Starting sequence number	*/
-	__u32		end_seq;	/* SEQ + FIN + SYN + datalen	*/
-	__u32		when;		/* used to compute rtt's	*/
-	__u8		flags;		/* TCP header flags.		*/
+	__u32		seq;		/* Starting sequence number 开始的序列号。对于sync数据包，这里的seq是生成的 seq号	*/
+	__u32		end_seq;	/* SEQ + FIN + SYN + datalen结束的序列号	*/
+	__u32		when;		/* used to compute rtt's 用于计算rtt	*/
+	__u8		flags;		/* TCP header flags.	TCP头标志位	*/
 
 	/* NOTE: These must match up to the flags byte in a
 	 *       real TCP header.
@@ -588,7 +589,7 @@ struct tcp_skb_cb {
 #define TCPCB_RETRANS		(TCPCB_SACKED_RETRANS|TCPCB_EVER_RETRANS)
 
 	__u16		urg_ptr;	/* Valid w/URG flags is set.	*/
-	__u32		ack_seq;	/* Sequence number ACK'd	*/
+	__u32		ack_seq;	/* Sequence number ACK'd ack序列号	*/
 };
 
 #define TCP_SKB_CB(__skb)	((struct tcp_skb_cb *)&((__skb)->cb[0]))
@@ -884,26 +885,26 @@ static inline int tcp_prequeue(struct sock *sk, struct sk_buff *skb)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 
-	if (!sysctl_tcp_low_latency && tp->ucopy.task) {
-		__skb_queue_tail(&tp->ucopy.prequeue, skb);
-		tp->ucopy.memory += skb->truesize;
-		if (tp->ucopy.memory > sk->sk_rcvbuf) {
+	if (!sysctl_tcp_low_latency && tp->ucopy.task) {//在未启用tcp_low_latency且有用户进程在读取数据的情况下，skb入队到prequeue
+		__skb_queue_tail(&tp->ucopy.prequeue, skb);//链入到预处理队列尾部
+		tp->ucopy.memory += skb->truesize;//递增数据包长度计数
+		if (tp->ucopy.memory > sk->sk_rcvbuf) {//超过了接收缓存区的长度
 			struct sk_buff *skb1;
 
 			BUG_ON(sock_owned_by_user(sk));
-
+			//循环摘取每个数据包
 			while ((skb1 = __skb_dequeue(&tp->ucopy.prequeue)) != NULL) {
-				sk->sk_backlog_rcv(sk, skb1);
-				NET_INC_STATS_BH(LINUX_MIB_TCPPREQUEUEDROPPED);
+				sk->sk_backlog_rcv(sk, skb1);//调用处理库函数,tcp 使用的是tcp_v4_do_rcv函数
+				NET_INC_STATS_BH(LINUX_MIB_TCPPREQUEUEDROPPED);//递增计数
 			}
 
-			tp->ucopy.memory = 0;
-		} else if (skb_queue_len(&tp->ucopy.prequeue) == 1) {
-			wake_up_interruptible(sk->sk_sleep);
-			if (!inet_csk_ack_scheduled(sk))
+			tp->ucopy.memory = 0;//清零数据包长度计数
+		} else if (skb_queue_len(&tp->ucopy.prequeue) == 1) {//如果只有一个数据包
+			wake_up_interruptible(sk->sk_sleep);//唤醒sock结构中的等待进程;
+			if (!inet_csk_ack_scheduled(sk))//检查是否需要ACK
 				inet_csk_reset_xmit_timer(sk, ICSK_TIME_DACK,
 						          (3 * TCP_RTO_MIN) / 4,
-							  TCP_RTO_MAX);
+							  TCP_RTO_MAX);//复位重发定时器
 		}
 		return 1;
 	}

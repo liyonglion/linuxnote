@@ -72,8 +72,8 @@ struct neigh_parms//代表的是邻居协议在每个设备上的不同参数
 
 	int	queue_len; //arp队列长度
 	int	ucast_probes; //再NUD_PROBE状态下，最大发送arp报文次数
-	int	app_probes;
-	int	mcast_probes;
+	int	app_probes;//APP最大探测次数
+	int	mcast_probes;//组播探测最大次数
 	int	anycast_delay;
 	int	proxy_delay;
 	int	proxy_qlen;

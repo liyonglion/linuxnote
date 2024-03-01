@@ -197,13 +197,13 @@ int inet_listen(struct socket *sock, int backlog)
 	unsigned char old_state;
 	int err;
 
-	lock_sock(sk);
+	lock_sock(sk);//加锁，如果sock锁被其他进程占用，当前进程睡眠等待睡眠
 
 	err = -EINVAL;
-	if (sock->state != SS_UNCONNECTED || sock->type != SOCK_STREAM)
+	if (sock->state != SS_UNCONNECTED || sock->type != SOCK_STREAM)//检查socket状态和类型
 		goto out;
 
-	old_state = sk->sk_state;
+	old_state = sk->sk_state;//记录原始状态信息
 	if (!((1 << old_state) & (TCPF_CLOSE | TCPF_LISTEN)))
 		goto out;
 
@@ -211,11 +211,11 @@ int inet_listen(struct socket *sock, int backlog)
 	 * we can only allow the backlog to be adjusted.
 	 */
 	if (old_state != TCP_LISTEN) {
-		err = inet_csk_listen_start(sk, backlog);
+		err = inet_csk_listen_start(sk, backlog);//建立监听环境
 		if (err)
 			goto out;
 	}
-	sk->sk_max_ack_backlog = backlog;
+	sk->sk_max_ack_backlog = backlog;//记录最大等待队列长度
 	err = 0;
 
 out:
@@ -591,33 +591,33 @@ int inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 
 	lock_sock(sk);
 
-	if (uaddr->sa_family == AF_UNSPEC) {
+	if (uaddr->sa_family == AF_UNSPEC) {//检查所属协议族
 		err = sk->sk_prot->disconnect(sk, flags);
 		sock->state = err ? SS_DISCONNECTING : SS_UNCONNECTED;
 		goto out;
 	}
 
-	switch (sock->state) {
+	switch (sock->state) {//判断socket状态。
 	default:
 		err = -EINVAL;
 		goto out;
-	case SS_CONNECTED:
+	case SS_CONNECTED://如果已经连接直接返回
 		err = -EISCONN;
 		goto out;
-	case SS_CONNECTING:
+	case SS_CONNECTING://正在连接就跳出语句
 		err = -EALREADY;
 		/* Fall out of switch with err, set for this state */
 		break;
-	case SS_UNCONNECTED:
+	case SS_UNCONNECTED://未连接就执行协议结构的连接函数
 		err = -EISCONN;
 		if (sk->sk_state != TCP_CLOSE)
 			goto out;
-
+		//调用tcp层的connect函数。tcp_v4_connect()
 		err = sk->sk_prot->connect(sk, uaddr, addr_len);
 		if (err < 0)
 			goto out;
 
-		sock->state = SS_CONNECTING;
+		sock->state = SS_CONNECTING;//正在连接状态
 
 		/* Just entered SS_CONNECTING state; the only
 		 * difference is that return value in non-blocking
@@ -627,15 +627,15 @@ int inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 		break;
 	}
 
-	timeo = sock_sndtimeo(sk, flags & O_NONBLOCK);
+	timeo = sock_sndtimeo(sk, flags & O_NONBLOCK);//设置发送定时器
 
 	if ((1 << sk->sk_state) & (TCPF_SYN_SENT | TCPF_SYN_RECV)) {
 		/* Error code is set above */
-		if (!timeo || !inet_wait_for_connect(sk, timeo))
+		if (!timeo || !inet_wait_for_connect(sk, timeo))//定时等待连接
 			goto out;
 
-		err = sock_intr_errno(timeo);
-		if (signal_pending(current))
+		err = sock_intr_errno(timeo);//超时错误码
+		if (signal_pending(current))//是否有信号等待处理
 			goto out;
 	}
 
@@ -650,7 +650,7 @@ int inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 	 * Hence, it is handled normally after connect() return successfully.
 	 */
 
-	sock->state = SS_CONNECTED;
+	sock->state = SS_CONNECTED;//设置为连接状态
 	err = 0;
 out:
 	release_sock(sk);
@@ -670,23 +670,23 @@ sock_error:
 
 int inet_accept(struct socket *sock, struct socket *newsock, int flags)
 {
-	struct sock *sk1 = sock->sk;
+	struct sock *sk1 = sock->sk;//获取服务器sock结构
 	int err = -EINVAL;
-	struct sock *sk2 = sk1->sk_prot->accept(sk1, flags, &err);
+	struct sock *sk2 = sk1->sk_prot->accept(sk1, flags, &err);//从全连接队列中获取客户端sock结构。tcp_prot->accept为inet_csk_accept()函数
 
 	if (!sk2)
 		goto do_err;
 
-	lock_sock(sk2);
+	lock_sock(sk2);//加锁，如果锁被其他进程占用，当前进程睡眠
 
 	BUG_TRAP((1 << sk2->sk_state) &
 		 (TCPF_ESTABLISHED | TCPF_CLOSE_WAIT | TCPF_CLOSE));
 
-	sock_graft(sk2, newsock);
+	sock_graft(sk2, newsock);//客户端socket和sock关联
 
-	newsock->state = SS_CONNECTED;
+	newsock->state = SS_CONNECTED;//设置客户端socket为连接状态
 	err = 0;
-	release_sock(sk2);
+	release_sock(sk2);//解锁，并唤醒锁上其他进程
 do_err:
 	return err;
 }
@@ -694,13 +694,14 @@ do_err:
 
 /*
  *	This does both peername and sockname.
+ peer控制是获取本端地址还是对端地址
  */
 int inet_getname(struct socket *sock, struct sockaddr *uaddr,
 			int *uaddr_len, int peer)
 {
-	struct sock *sk		= sock->sk;
-	struct inet_sock *inet	= inet_sk(sk);
-	struct sockaddr_in *sin	= (struct sockaddr_in *)uaddr;
+	struct sock *sk		= sock->sk;//获取sock结构指针
+	struct inet_sock *inet	= inet_sk(sk);//获取inet的sock结构指针
+	struct sockaddr_in *sin	= (struct sockaddr_in *)uaddr;//转换地址结构
 
 	sin->sin_family = AF_INET;
 	if (peer) {
@@ -708,13 +709,13 @@ int inet_getname(struct socket *sock, struct sockaddr *uaddr,
 		    (((1 << sk->sk_state) & (TCPF_CLOSE | TCPF_SYN_SENT)) &&
 		     peer == 1))
 			return -ENOTCONN;
-		sin->sin_port = inet->dport;
-		sin->sin_addr.s_addr = inet->daddr;
+		sin->sin_port = inet->dport;//记录目标端口
+		sin->sin_addr.s_addr = inet->daddr;//记录目标地址
 	} else {
 		__be32 addr = inet->rcv_saddr;
 		if (!addr)
-			addr = inet->saddr;
-		sin->sin_port = inet->sport;
+			addr = inet->saddr;//记录源地址
+		sin->sin_port = inet->sport;//记录源端口
 		sin->sin_addr.s_addr = addr;
 	}
 	memset(sin->sin_zero, 0, sizeof(sin->sin_zero));
@@ -1445,14 +1446,14 @@ static int __init inet_init(void)
 	 *	Add all the base protocols.
 	 */
 
-	if (inet_add_protocol(&icmp_protocol, IPPROTO_ICMP) < 0)
+	if (inet_add_protocol(&icmp_protocol, IPPROTO_ICMP) < 0)//登记ICMP函数表结构
 		printk(KERN_CRIT "inet_init: Cannot add ICMP protocol\n");
 	if (inet_add_protocol(&udp_protocol, IPPROTO_UDP) < 0)
-		printk(KERN_CRIT "inet_init: Cannot add UDP protocol\n");
+		printk(KERN_CRIT "inet_init: Cannot add UDP protocol\n");//登记UDP函数表结构
 	if (inet_add_protocol(&tcp_protocol, IPPROTO_TCP) < 0)
-		printk(KERN_CRIT "inet_init: Cannot add TCP protocol\n");
+		printk(KERN_CRIT "inet_init: Cannot add TCP protocol\n");//登记TCP函数表结构
 #ifdef CONFIG_IP_MULTICAST
-	if (inet_add_protocol(&igmp_protocol, IPPROTO_IGMP) < 0)
+	if (inet_add_protocol(&igmp_protocol, IPPROTO_IGMP) < 0)//登记IGMP函数表结构
 		printk(KERN_CRIT "inet_init: Cannot add IGMP protocol\n");
 #endif
 

@@ -82,10 +82,10 @@ struct inet_connection_sock_af_ops {
  * @icsk_ack:		   Delayed ACK control data
  * @icsk_mtup;		   MTU probing control data
  */
-struct inet_connection_sock {
+struct inet_connection_sock {//面向连接的套接字.通用传输控制信息,连接请求队列request_sock_queue ,重传超时定时器、拥塞控制算法操作函数tcp_congestion_ops 以及ipv4、ipv6在网络层的操作函数inet_connection_sock_af_ops都在此结构体中
 	/* inet_sock has to be the first member! */
 	struct inet_sock	  icsk_inet; //INET 协议族的sock 结构
-	struct request_sock_queue icsk_accept_queue;//确定接收的队列
+	struct request_sock_queue icsk_accept_queue;//链接管理队列：包括正在握手的、已经完成握手等待accept()的套接字。也就是半连接队列喝全连接队列
 	struct inet_bind_bucket	  *icsk_bind_hash; //sk所在的bhash桶
 	unsigned long		  icsk_timeout; //超时
  	struct timer_list	  icsk_retransmit_timer;//没有 ACK 时的重发定时器
@@ -112,7 +112,7 @@ struct inet_connection_sock {
 		__u32		  lrcvtime;	 /* timestamp of last received data packet */
 		__u16		  last_seg_size; /* Size of last incoming segment	   */
 		__u16		  rcv_mss;	 /* MSS used for delayed ACK decisions	   */ 
-	} icsk_ack;
+	} icsk_ack;//这个结构是为了连接请求过程中的“应答”目的。
 	struct {
 		int		  enabled;
 

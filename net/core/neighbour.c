@@ -910,6 +910,14 @@ int __neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
 		goto out_unlock_bh;
 
 	now = jiffies;//记录当前时间
+	
+/*
+
+当状态为NUD_NONE时，
+1、如果组播探测最大次数加上应用探测的最大次数不为0，则将状态设置为INCOMPLETE，更新update时间，并修改定时器的超时时间
+2、否则将邻居项的状态设置为failed，更新update时间，直接释放数据包缓存
+当状态为STALE时，当有数据包要发送时，则将状态设置为DELAY，更新update时间并修改邻居项定时器的超时时间
+*/
 	//当前邻居状态不是过期状态或者未完成状态。
 	if (!(neigh->nud_state & (NUD_STALE | NUD_INCOMPLETE))) {//只有NUD_NONE状态就进入这个分支
 		//检查邻居参数结构的探测值
@@ -927,14 +935,18 @@ int __neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
 				kfree_skb(skb);
 			return 1;
 		}
-	} else if (neigh->nud_state & NUD_STALE) {//使用过期状态中邻居表项，直接使用，同时需要将状态为延迟状态
+	} else if (neigh->nud_state & NUD_STALE) {//使用过期状态中邻居表项，直接使用，同时需要将状态为延迟状态。
 		NEIGH_PRINTK2("neigh %p is delayed.\n", neigh);
 		neigh->nud_state = NUD_DELAY;//修改为延迟状态
 		neigh->updated = jiffies;//记录更新时间
 		neigh_add_timer(neigh,
 				jiffies + neigh->parms->delay_probe_time);//设置定时器，定时器函数为neigh_timer_handler
 	}
-	//arp队列数据包长度超过队列长度，则丢弃最早加入的数据包
+	/*
+	对于处于INCOMPLETE状态的邻居项，已经启动了邻居项定时器，此时只需要
+	将要发送的数据包存入邻居项的数据包缓存队列里即可。后续如果
+	邻居项可达时则会有相应的函数发送出去。arp队列数据包长度超过队列长度，则丢弃最早加入的数据包
+	*/
 	if (neigh->nud_state == NUD_INCOMPLETE) {//未完成状态
 		if (skb) {//需要发送数据包
 			if (skb_queue_len(&neigh->arp_queue) >=

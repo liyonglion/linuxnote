@@ -186,17 +186,17 @@ static inline int ip_route_newports(struct rtable **rp, u8 protocol,
 				    __be16 sport, __be16 dport, struct sock *sk)
 {
 	if (sport != (*rp)->fl.fl_ip_sport ||
-	    dport != (*rp)->fl.fl_ip_dport) {
+	    dport != (*rp)->fl.fl_ip_dport) {//源端口或者目标端口于路由表中不同，也就是发送了变化
 		struct flowi fl;
 
-		memcpy(&fl, &(*rp)->fl, sizeof(fl));
-		fl.fl_ip_sport = sport;
-		fl.fl_ip_dport = dport;
-		fl.proto = protocol;
-		ip_rt_put(*rp);
+		memcpy(&fl, &(*rp)->fl, sizeof(fl));//复制路由表的键值内容
+		fl.fl_ip_sport = sport;//修改为设置的源端口
+		fl.fl_ip_dport = dport;//修改为设置的目标端口
+		fl.proto = protocol;//使用IP协议
+		ip_rt_put(*rp);//放弃对原路由表的使用
 		*rp = NULL;
 		security_sk_classify_flow(sk, &fl);
-		return ip_route_output_flow(sock_net(sk), rp, &fl, sk, 0);
+		return ip_route_output_flow(sock_net(sk), rp, &fl, sk, 0);//创建路由表
 	}
 	return 0;
 }

@@ -134,7 +134,7 @@ static const struct file_operations socket_file_ops = {
 	.mmap =		sock_mmap,
 	.open =		sock_no_open,	/* special open code to disallow open via /proc */
 	.release =	sock_close,
-	.fasync =	sock_fasync,
+	.fasync =	sock_fasync,//异步操作。int on = 1;ioctl(server_fd, FIOASYNC,&on);
 	.sendpage =	sock_sendpage,
 	.splice_write = generic_splice_sendpage,
 	.splice_read =	sock_splice_read,
@@ -1025,16 +1025,16 @@ static int sock_fasync(int fd, struct file *filp, int on)
 	struct fasync_struct *fa, *fna = NULL, **prev;
 	struct socket *sock;
 	struct sock *sk;
-
-	if (on) {
+	//on 控制创建、修改、或者删除异步结构
+	if (on) {//如果允许创建或者修改，就分配新的异步结构空间
 		fna = kmalloc(sizeof(struct fasync_struct), GFP_KERNEL);
 		if (fna == NULL)
 			return -ENOMEM;
 	}
 
-	sock = filp->private_data;
+	sock = filp->private_data;//获取socket结构
 
-	sk = sock->sk;
+	sk = sock->sk;//获取sock结构
 	if (sk == NULL) {
 		kfree(fna);
 		return -EINVAL;
@@ -1042,32 +1042,32 @@ static int sock_fasync(int fd, struct file *filp, int on)
 
 	lock_sock(sk);
 
-	prev = &(sock->fasync_list);
+	prev = &(sock->fasync_list);//获取队列中的第一个异步结构指针
 
 	for (fa = *prev; fa != NULL; prev = &fa->fa_next, fa = *prev)
-		if (fa->fa_file == filp)
+		if (fa->fa_file == filp)//查找异步结构
 			break;
 
 	if (on) {
-		if (fa != NULL) {
+		if (fa != NULL) {//找到了该socket结构体的异步结构
 			write_lock_bh(&sk->sk_callback_lock);
-			fa->fa_fd = fd;
+			fa->fa_fd = fd;//记录文件号
 			write_unlock_bh(&sk->sk_callback_lock);
 
 			kfree(fna);
 			goto out;
-		}
-		fna->fa_file = filp;
-		fna->fa_fd = fd;
-		fna->magic = FASYNC_MAGIC;
-		fna->fa_next = sock->fasync_list;
+		}//没有找到就使用新建的异步结构
+		fna->fa_file = filp;//记录关联文件指针
+		fna->fa_fd = fd;//记录文件号
+		fna->magic = FASYNC_MAGIC;//设置
+		fna->fa_next = sock->fasync_list;//指向下一个异步结构
 		write_lock_bh(&sk->sk_callback_lock);
-		sock->fasync_list = fna;
+		sock->fasync_list = fna;//链入队列首部
 		write_unlock_bh(&sk->sk_callback_lock);
-	} else {
-		if (fa != NULL) {
+	} else {//不允许创建或者修改就是删除操作
+		if (fa != NULL) {//找到了socket的异步结构
 			write_lock_bh(&sk->sk_callback_lock);
-			*prev = fa->fa_next;
+			*prev = fa->fa_next;//异步结构脱队
 			write_unlock_bh(&sk->sk_callback_lock);
 			kfree(fa);
 		}
@@ -1389,17 +1389,17 @@ asmlinkage long sys_listen(int fd, int backlog)
 	int err, fput_needed;
 	int somaxconn;
 
-	sock = sockfd_lookup_light(fd, &err, &fput_needed);
+	sock = sockfd_lookup_light(fd, &err, &fput_needed);//通过fd找到创建的struct socket 结构。间接通过struct file来查找
 	if (sock) {
-		somaxconn = sock_net(sock->sk)->core.sysctl_somaxconn;
-		if ((unsigned)backlog > somaxconn)
+		somaxconn = sock_net(sock->sk)->core.sysctl_somaxconn;//获取系统参数somaxconn
+		if ((unsigned)backlog > somaxconn)//backlog不能超过somaxconn
 			backlog = somaxconn;
 
-		err = security_socket_listen(sock, backlog);
+		err = security_socket_listen(sock, backlog);//IP安全相关，暂时忽略
 		if (!err)
-			err = sock->ops->listen(sock, backlog);
+			err = sock->ops->listen(sock, backlog);//调用具体的协议族listen函数，即inet_listen
 
-		fput_light(sock->file, fput_needed);
+		fput_light(sock->file, fput_needed);//fput_needed 来递减文件的计数器,如果文件的计数器递减到0则进一步释放文件结构指针
 	}
 	return err;
 }
@@ -1424,15 +1424,15 @@ asmlinkage long sys_accept(int fd, struct sockaddr __user *upeer_sockaddr,
 	int err, len, newfd, fput_needed;
 	char address[MAX_SOCK_ADDR];
 
-	sock = sockfd_lookup_light(fd, &err, &fput_needed);
+	sock = sockfd_lookup_light(fd, &err, &fput_needed);//通过fd找到创建的struct socket 结构。间接通过struct file来查找
 	if (!sock)
 		goto out;
 
 	err = -ENFILE;
-	if (!(newsock = sock_alloc()))
+	if (!(newsock = sock_alloc()))//为客户端准备sock结构
 		goto out_put;
 
-	newsock->type = sock->type;
+	newsock->type = sock->type;//继承服务器的socket类型和函数表
 	newsock->ops = sock->ops;
 
 	/*
@@ -1441,31 +1441,33 @@ asmlinkage long sys_accept(int fd, struct sockaddr __user *upeer_sockaddr,
 	 */
 	__module_get(newsock->ops->owner);
 
-	newfd = sock_alloc_fd(&newfile);
+	newfd = sock_alloc_fd(&newfile);//为客户端sock分配文件号和文件结构
 	if (unlikely(newfd < 0)) {
 		err = newfd;
 		sock_release(newsock);
 		goto out_put;
 	}
 
-	err = sock_attach_fd(newsock, newfile);
+	err = sock_attach_fd(newsock, newfile);//将客户端sock和文件关联
 	if (err < 0)
 		goto out_fd_simple;
 
 	err = security_socket_accept(sock, newsock);
 	if (err)
 		goto out_fd;
-
+	//调用具体的协议族accept函数，即inet_accept
 	err = sock->ops->accept(sock, newsock, sock->file->f_flags);
 	if (err < 0)
 		goto out_fd;
-
+	//获取客户端socket地址
 	if (upeer_sockaddr) {
+		//获取客户端socket地址。getname为inet_getname
 		if (newsock->ops->getname(newsock, (struct sockaddr *)address,
 					  &len, 2) < 0) {
 			err = -ECONNABORTED;
 			goto out_fd;
 		}
+		//复制地址到服务器程序中
 		err = move_addr_to_user(address, len, upeer_sockaddr,
 					upeer_addrlen);
 		if (err < 0)
@@ -1474,8 +1476,8 @@ asmlinkage long sys_accept(int fd, struct sockaddr __user *upeer_sockaddr,
 
 	/* File flags are not inherited via accept() unlike another OSes. */
 
-	fd_install(newfd, newfile);
-	err = newfd;
+	fd_install(newfd, newfile);//文件号和文件结构建立关联
+	err = newfd;//返回文件号给服务器程序
 
 	security_socket_post_accept(sock, newsock);
 
@@ -1513,10 +1515,10 @@ asmlinkage long sys_connect(int fd, struct sockaddr __user *uservaddr,
 	char address[MAX_SOCK_ADDR];
 	int err, fput_needed;
 
-	sock = sockfd_lookup_light(fd, &err, &fput_needed);
+	sock = sockfd_lookup_light(fd, &err, &fput_needed);//通过fd找到创建的struct socket 结构。间接通过struct file来查找
 	if (!sock)
 		goto out;
-	err = move_addr_to_kernel(uservaddr, addrlen, address);
+	err = move_addr_to_kernel(uservaddr, addrlen, address);//将用户态目的地址结构拷贝进内核态
 	if (err < 0)
 		goto out_put;
 
@@ -1526,7 +1528,7 @@ asmlinkage long sys_connect(int fd, struct sockaddr __user *uservaddr,
 		goto out_put;
 
 	err = sock->ops->connect(sock, (struct sockaddr *)address, addrlen,
-				 sock->file->f_flags);
+				 sock->file->f_flags);//调用	具体的协议族connect函数，即inet_stream_connect
 out_put:
 	fput_light(sock->file, fput_needed);
 out:

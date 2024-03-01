@@ -230,8 +230,10 @@ struct tcp_request_sock {
 	/* Only used by TCP MD5 Signature so far. */
 	struct tcp_request_sock_ops	*af_specific;
 #endif
+	//客户端syn段中携带的seq，即客户端的初始序列号
 	u32			 	rcv_isn;
-	u32			 	snt_isn;
+	//SYN+ACK段携带的seq，即服务端的初始化序列号
+	u32			 	snt_isn;//发送端seq序列号
 };
 
 static inline struct tcp_request_sock *tcp_rsk(const struct request_sock *req)
@@ -362,7 +364,7 @@ struct tcp_sock {
 
 	u32	retrans_stamp;	/* Timestamp of the last retransmit,
 				 * also used in SYN-SENT to remember stamp of
-				 * the first SYN. */
+				 * the first SYN. 记录发送SYN的时间戳，对于超时重传syn，也需要更新该值 */
 	u32	undo_marker;	/* tracking retrans started here. */
 	int	undo_retrans;	/* number of undoable retransmissions. */
 	u32	urg_seq;	/* Seq of received urgent pointer */
@@ -416,7 +418,7 @@ static inline struct tcp_sock *tcp_sk(const struct sock *sk)
 	return (struct tcp_sock *)sk;
 }
 
-struct tcp_timewait_sock {
+struct tcp_timewait_sock {//对tcp套接字处于TCP_TIME_WAIT状态的描述；处于timewait状态时，tcp_sock结构体会变成tcp_timewait_sock结构体。
 	struct inet_timewait_sock tw_sk;
 	u32			  tw_rcv_nxt;
 	u32			  tw_snd_nxt;

@@ -103,10 +103,10 @@ struct inet_hashinfo __cacheline_aligned tcp_hashinfo = {
 
 static inline __u32 tcp_v4_init_sequence(struct sk_buff *skb)
 {
-	return secure_tcp_sequence_number(ip_hdr(skb)->daddr,
-					  ip_hdr(skb)->saddr,
-					  tcp_hdr(skb)->dest,
-					  tcp_hdr(skb)->source);
+	return secure_tcp_sequence_number(ip_hdr(skb)->daddr,//目标地址
+					  ip_hdr(skb)->saddr,//源地址
+					  tcp_hdr(skb)->dest,//目标端口
+					  tcp_hdr(skb)->source);//源端口
 }
 
 int tcp_twsk_unique(struct sock *sk, struct sock *sktw, void *twp)
@@ -159,13 +159,13 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 	if (usin->sin_family != AF_INET)
 		return -EAFNOSUPPORT;
 
-	nexthop = daddr = usin->sin_addr.s_addr;
-	if (inet->opt && inet->opt->srr) {
+	nexthop = daddr = usin->sin_addr.s_addr;//用于获取路由缓存
+	if (inet->opt && inet->opt->srr) {//是否设置了IP选项结构，并指定了源路由
 		if (!daddr)
 			return -EINVAL;
-		nexthop = inet->opt->faddr;
+		nexthop = inet->opt->faddr;//跳转地址未转发地址
 	}
-
+	//根据目的、源地址、源端口、目标端口、绑定的接口获取路由缓存
 	tmp = ip_route_connect(&rt, nexthop, inet->saddr,
 			       RT_CONN_FLAGS(sk), sk->sk_bound_dev_if,
 			       IPPROTO_TCP,
@@ -175,19 +175,19 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 			IP_INC_STATS_BH(IPSTATS_MIB_OUTNOROUTES);
 		return tmp;
 	}
-
+	//组播广播不需要connect。这里直接返回network unreachable错误
 	if (rt->rt_flags & (RTCF_MULTICAST | RTCF_BROADCAST)) {
 		ip_rt_put(rt);
 		return -ENETUNREACH;
 	}
-
+	//IP选项是没有设置了srr，则使用路由缓存的下一跳地址作为目的地址
 	if (!inet->opt || !inet->opt->srr)
 		daddr = rt->rt_dst;
 
-	if (!inet->saddr)
+	if (!inet->saddr)//源地址为空，使用路由缓存的源地址
 		inet->saddr = rt->rt_src;
-	inet->rcv_saddr = inet->saddr;
-
+	inet->rcv_saddr = inet->saddr;//接收地址和源地址相同
+	//接受过但现在地址已经改变，需要复位
 	if (tp->rx_opt.ts_recent_stamp && inet->daddr != daddr) {
 		/* Reset inherited state */
 		tp->rx_opt.ts_recent	   = 0;
@@ -195,9 +195,9 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 		tp->write_seq		   = 0;
 	}
 
-	if (tcp_death_row.sysctl_tw_recycle &&
-	    !tp->rx_opt.ts_recent_stamp && rt->rt_dst == daddr) {
-		struct inet_peer *peer = rt_get_peer(rt);
+	if (tcp_death_row.sysctl_tw_recycle &&//用户打开了tcp_tw_recycle
+	    !tp->rx_opt.ts_recent_stamp && rt->rt_dst == daddr) {//使能了tcp_Timestamp。没有设置ip srr。接受过切地址没有改变
+		struct inet_peer *peer = rt_get_peer(rt);//获取对方信息
 		/*
 		 * VJ's idea. We save last timestamp seen from
 		 * the destination in peer table, when entering state
@@ -205,19 +205,19 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 		 * when trying new connection.
 		 */
 		if (peer != NULL &&
-		    peer->tcp_ts_stamp + TCP_PAWS_MSL >= get_seconds()) {
+		    peer->tcp_ts_stamp + TCP_PAWS_MSL >= get_seconds()) {//调整时间戳
 			tp->rx_opt.ts_recent_stamp = peer->tcp_ts_stamp;
 			tp->rx_opt.ts_recent = peer->tcp_ts;
 		}
 	}
-
-	inet->dport = usin->sin_port;
-	inet->daddr = daddr;
+	
+	inet->dport = usin->sin_port;//记录指定的目标端口号
+	inet->daddr = daddr;//记录路由表的目的地址
 
 	inet_csk(sk)->icsk_ext_hdr_len = 0;
 	if (inet->opt)
-		inet_csk(sk)->icsk_ext_hdr_len = inet->opt->optlen;
-
+		inet_csk(sk)->icsk_ext_hdr_len = inet->opt->optlen;//记录IP选项规定长度
+	//初始化mss 为最小值536
 	tp->rx_opt.mss_clamp = 536;
 
 	/* Socket identity is still unknown (sport may be zero).
@@ -225,29 +225,29 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 	 * lock select source port, enter ourselves into the hash tables and
 	 * complete initialization after this.
 	 */
-	tcp_set_state(sk, TCP_SYN_SENT);
-	err = inet_hash_connect(&tcp_death_row, sk);
+	tcp_set_state(sk, TCP_SYN_SENT);//将sk状态置为SYN-SENT
+	err = inet_hash_connect(&tcp_death_row, sk);//检查端口是否可用
 	if (err)
 		goto failure;
 
 	err = ip_route_newports(&rt, IPPROTO_TCP,
-				inet->sport, inet->dport, sk);
+				inet->sport, inet->dport, sk);//检查或者创建路由表
 	if (err)
 		goto failure;
 
 	/* OK, now commit destination to socket.  */
-	sk->sk_gso_type = SKB_GSO_TCPV4;
-	sk_setup_caps(sk, &rt->u.dst);
+	sk->sk_gso_type = SKB_GSO_TCPV4;//是Generic Segmentation Offload 的缩写，意思是通用分段值，它的策略是尽可能向后推迟分段,想时间是在网卡驱动里分段,在网卡驱动里把大包(super-packet)拆分成 SG list 或者先将一块分配好的内存重组分段，再交给网卡驱动。
+	sk_setup_caps(sk, &rt->u.dst);//设置sk的capability，具体来说设置GSO
 
 	if (!tp->write_seq)
 		tp->write_seq = secure_tcp_sequence_number(inet->saddr,
 							   inet->daddr,
 							   inet->sport,
-							   usin->sin_port);
+							   usin->sin_port);//计算发送序列号
 
-	inet->id = tp->write_seq ^ jiffies;
+	inet->id = tp->write_seq ^ jiffies;//设置inet_sock结构的ID
 
-	err = tcp_connect(sk);
+	err = tcp_connect(sk);//构建syn包并发送
 	rt = NULL;
 	if (err)
 		goto failure;
@@ -259,10 +259,10 @@ failure:
 	 * This unhashes the socket and releases the local port,
 	 * if necessary.
 	 */
-	tcp_set_state(sk, TCP_CLOSE);
-	ip_rt_put(rt);
-	sk->sk_route_caps = 0;
-	inet->dport = 0;
+	tcp_set_state(sk, TCP_CLOSE);//设置关闭状态
+	ip_rt_put(rt);//放弃路由表
+	sk->sk_route_caps = 0;//清除兼容标志
+	inet->dport = 0;//清除端口
 	return err;
 }
 
@@ -721,32 +721,32 @@ static void tcp_v4_reqsk_send_ack(struct sk_buff *skb,
 static int __tcp_v4_send_synack(struct sock *sk, struct request_sock *req,
 				struct dst_entry *dst)
 {
-	const struct inet_request_sock *ireq = inet_rsk(req);
+	const struct inet_request_sock *ireq = inet_rsk(req);//获取连接请求结构体
 	int err = -1;
 	struct sk_buff * skb;
 
 	/* First, grab a route. */
-	if (!dst && (dst = inet_csk_route_req(sk, req)) == NULL)
+	if (!dst && (dst = inet_csk_route_req(sk, req)) == NULL)//根据连接请求查找通往客户端的路由缓存项
 		return -1;
 
-	skb = tcp_make_synack(sk, dst, req);
+	skb = tcp_make_synack(sk, dst, req);//创建synack报文
 
 	if (skb) {
-		struct tcphdr *th = tcp_hdr(skb);
+		struct tcphdr *th = tcp_hdr(skb);//获取tcp报文头
 
 		th->check = tcp_v4_check(skb->len,
 					 ireq->loc_addr,
 					 ireq->rmt_addr,
 					 csum_partial((char *)th, skb->len,
-						      skb->csum));
+						      skb->csum));//计算校验和
 
 		err = ip_build_and_send_pkt(skb, sk, ireq->loc_addr,
 					    ireq->rmt_addr,
-					    ireq->opt);
-		err = net_xmit_eval(err);
+					    ireq->opt);//建立IP头部，并发送数据包
+		err = net_xmit_eval(err);//检查是否发送成功
 	}
 
-	dst_release(dst);
+	dst_release(dst);//递减路由项使用计数
 	return err;
 }
 
@@ -1246,9 +1246,9 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 	struct inet_request_sock *ireq;
 	struct tcp_options_received tmp_opt;
 	struct request_sock *req;
-	__be32 saddr = ip_hdr(skb)->saddr;
-	__be32 daddr = ip_hdr(skb)->daddr;
-	__u32 isn = TCP_SKB_CB(skb)->when;
+	__be32 saddr = ip_hdr(skb)->saddr;//源地址
+	__be32 daddr = ip_hdr(skb)->daddr;//目标地址
+	__u32 isn = TCP_SKB_CB(skb)->when;//是否重发
 	struct dst_entry *dst = NULL;
 #ifdef CONFIG_SYN_COOKIES
 	int want_cookie = 0;
@@ -1281,7 +1281,7 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 	if (sk_acceptq_is_full(sk) && inet_csk_reqsk_queue_young(sk) > 1)
 		goto drop;
 
-	req = inet_reqsk_alloc(&tcp_request_sock_ops);
+	req = inet_reqsk_alloc(&tcp_request_sock_ops);//分配连接请求
 	if (!req)
 		goto drop;
 
@@ -1289,11 +1289,11 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 	tcp_rsk(req)->af_specific = &tcp_request_sock_ipv4_ops;
 #endif
 
-	tcp_clear_options(&tmp_opt);
-	tmp_opt.mss_clamp = 536;
-	tmp_opt.user_mss  = tcp_sk(sk)->rx_opt.user_mss;
+	tcp_clear_options(&tmp_opt);//清除TCP接收选项结构，注意tmp_opt是临时变量
+	tmp_opt.mss_clamp = 536;//设置最大传输单元
+	tmp_opt.user_mss  = tcp_sk(sk)->rx_opt.user_mss;//用户指定的mSS值
 
-	tcp_parse_options(skb, &tmp_opt, 0);
+	tcp_parse_options(skb, &tmp_opt, 0);//解析接收的TCP选项
 
 	if (want_cookie && !tmp_opt.saw_tstamp)
 		tcp_clear_options(&tmp_opt);
@@ -1314,10 +1314,10 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 	if (security_inet_conn_request(sk, skb, req))
 		goto drop_and_free;
 
-	ireq = inet_rsk(req);
-	ireq->loc_addr = daddr;
-	ireq->rmt_addr = saddr;
-	ireq->opt = tcp_v4_save_options(sk, skb);
+	ireq = inet_rsk(req);//获取INET的连接请求结构指针
+	ireq->loc_addr = daddr;//记录目标地址
+	ireq->rmt_addr = saddr;//记录源地址
+	ireq->opt = tcp_v4_save_options(sk, skb);//保存完成的IP头选项
 	if (!want_cookie)
 		TCP_ECN_create_request(req, tcp_hdr(skb));
 
@@ -1339,10 +1339,10 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 		 * timewait bucket, so that all the necessary checks
 		 * are made in the function processing timewait state.
 		 */
-		if (tmp_opt.saw_tstamp &&
-		    tcp_death_row.sysctl_tw_recycle &&
-		    (dst = inet_csk_route_req(sk, req)) != NULL &&
-		    (peer = rt_get_peer((struct rtable *)dst)) != NULL &&
+		if (tmp_opt.saw_tstamp &&//打开了tcp_timestamp
+		    tcp_death_row.sysctl_tw_recycle &&//打开了tcp_tw_recycle
+		    (dst = inet_csk_route_req(sk, req)) != NULL &&//有路由缓存项
+		    (peer = rt_get_peer((struct rtable *)dst)) != NULL &&//路由缓存项中存在peer选项
 		    peer->v4daddr == saddr) {
 			if (get_seconds() < peer->tcp_ts_stamp + TCP_PAWS_MSL &&
 			    (s32)(peer->tcp_ts - req->ts_recent) >
@@ -1371,14 +1371,14 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 			goto drop_and_release;
 		}
 
-		isn = tcp_v4_init_sequence(skb);
+		isn = tcp_v4_init_sequence(skb);//获取seq序列号
 	}
 	tcp_rsk(req)->snt_isn = isn;
 
-	if (__tcp_v4_send_synack(sk, req, dst) || want_cookie)
+	if (__tcp_v4_send_synack(sk, req, dst) || want_cookie)//发送sync+ACK数据包
 		goto drop_and_free;
 
-	inet_csk_reqsk_queue_hash_add(sk, req, TCP_TIMEOUT_INIT);
+	inet_csk_reqsk_queue_hash_add(sk, req, TCP_TIMEOUT_INIT);//将连接请求加入到半连接队列中
 	return 0;
 
 drop_and_release:
@@ -1412,20 +1412,20 @@ struct sock *tcp_v4_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 	if (!dst && (dst = inet_csk_route_req(sk, req)) == NULL)
 		goto exit;
 
-	newsk = tcp_create_openreq_child(sk, req, skb);
-	if (!newsk)
+	newsk = tcp_create_openreq_child(sk, req, skb);//克隆服务器的sock结构，创建客户端的sock
+	if (!newsk)//克隆失败，退出
 		goto exit;
 
-	newsk->sk_gso_type = SKB_GSO_TCPV4;
-	sk_setup_caps(newsk, dst);
+	newsk->sk_gso_type = SKB_GSO_TCPV4;//设置分段 类型
+	sk_setup_caps(newsk, dst);//设置分段标志和分段值
 
-	newtp		      = tcp_sk(newsk);
-	newinet		      = inet_sk(newsk);
-	ireq		      = inet_rsk(req);
-	newinet->daddr	      = ireq->rmt_addr;
-	newinet->rcv_saddr    = ireq->loc_addr;
-	newinet->saddr	      = ireq->loc_addr;
-	newinet->opt	      = ireq->opt;
+	newtp		      = tcp_sk(newsk);//获取tcp_sock结构
+	newinet		      = inet_sk(newsk);//获取inet_sockj结构
+	ireq		      = inet_rsk(req);//获取inet连接请求
+	newinet->daddr	      = ireq->rmt_addr;//记录目标地址
+	newinet->rcv_saddr    = ireq->loc_addr;//记录接收地址
+	newinet->saddr	      = ireq->loc_addr;//记录源地址
+	newinet->opt	      = ireq->opt;//记录IP选项指针
 	ireq->opt	      = NULL;
 	newinet->mc_index     = inet_iif(skb);
 	newinet->mc_ttl	      = ip_hdr(skb)->ttl;
@@ -1474,21 +1474,21 @@ static struct sock *tcp_v4_hnd_req(struct sock *sk, struct sk_buff *skb)
 	const struct iphdr *iph = ip_hdr(skb);
 	struct sock *nsk;
 	struct request_sock **prev;
-	/* Find possible connection requests. */
+	/* Find possible connection requests. 从半连接队列中查找连接请求结构体 */
 	struct request_sock *req = inet_csk_search_req(sk, &prev, th->source,
-						       iph->saddr, iph->daddr);
-	if (req)
-		return tcp_check_req(sk, skb, req, prev);
+						       iph->saddr, iph->daddr);//查找连接请求结构
 
+	if (req)//如果找到了连接请求结构体
+		return tcp_check_req(sk, skb, req, prev);//创建代表客户端的sock结构，将连接请求链入到这个sock结构的接收队列中
+	//没有找到连接请求结构，还不能创建客户端sock结构，就在已经连接的队列中查找
 	nsk = inet_lookup_established(sock_net(sk), &tcp_hashinfo, iph->saddr,
 			th->source, iph->daddr, th->dest, inet_iif(skb));
-
-	if (nsk) {
-		if (nsk->sk_state != TCP_TIME_WAIT) {
+	if (nsk) {//找到
+		if (nsk->sk_state != TCP_TIME_WAIT) {//状态不是TIME_WAIT状态，返回客户端sock结构
 			bh_lock_sock(nsk);
 			return nsk;
 		}
-		inet_twsk_put(inet_twsk(nsk));
+		inet_twsk_put(inet_twsk(nsk));//释放time_wait状态的sock结构
 		return NULL;
 	}
 
@@ -1496,6 +1496,7 @@ static struct sock *tcp_v4_hnd_req(struct sock *sk, struct sk_buff *skb)
 	if (!th->rst && !th->syn && th->ack)
 		sk = cookie_v4_check(sk, skb, &(IPCB(skb)->opt));
 #endif
+	//注意此处返回的是sk，并不是空。上一层函数的if nsw!=sk 就会跳过
 	return sk;
 }
 
@@ -1528,6 +1529,7 @@ static __sum16 tcp_v4_checksum_init(struct sk_buff *skb)
  * doing backlog processing we use the BH locking scheme.
  * This is because we cannot sleep with the original spinlock
  * held.
+ * 该函数处理除了time_wait状态外所有sk情况
  */
 int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
 {
@@ -1542,27 +1544,28 @@ int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
 	if (tcp_v4_inbound_md5_hash(sk, skb))
 		goto discard;
 #endif
-
-	if (sk->sk_state == TCP_ESTABLISHED) { /* Fast path */
+	//处理established状态包
+	if (sk->sk_state == TCP_ESTABLISHED) { /* 处于已经连接状态*/
 		TCP_CHECK_TIMER(sk);
-		if (tcp_rcv_established(sk, skb, tcp_hdr(skb), skb->len)) {
+		if (tcp_rcv_established(sk, skb, tcp_hdr(skb), skb->len)) {//处理数据包
 			rsk = sk;
 			goto reset;
 		}
-		TCP_CHECK_TIMER(sk);
+		TCP_CHECK_TIMER(sk);//空语句
 		return 0;
 	}
-
+	//检查数据块长度，检查校验和
 	if (skb->len < tcp_hdrlen(skb) || tcp_checksum_complete(skb))
 		goto csum_err;
-
-	if (sk->sk_state == TCP_LISTEN) {
-		struct sock *nsk = tcp_v4_hnd_req(sk, skb);
-		if (!nsk)
+	//当收到第一次握手的syn包会走到这个位置，但是在tcp_v4_hnd_req查找不到请求结构，此时nsk为sk，不会走到if(nsk != sk)分支。在tcp_rcv_state_process中处理第一次握手
+	//当收到第三次握手的ack包会走到这个位置，但是在tcp_v4_hnd_req能查找到请求结构体，会申请一个新的sock结构，此时nsk != sk，会走到下面的分支。
+	if (sk->sk_state == TCP_LISTEN) {//如果处于监听状态。
+		struct sock *nsk = tcp_v4_hnd_req(sk, skb);//查找和创建代表客户端的sock结构。
+		if (!nsk)//没有找到，丢弃数据包
 			goto discard;
 
-		if (nsk != sk) {
-			if (tcp_child_process(sk, nsk, skb)) {
+		if (nsk != sk) {//如果找到的不是服务器当前使用的sock结构，nsk代表的是客户端的sock结构
+			if (tcp_child_process(sk, nsk, skb)) {//唤醒服务器进程接收客户端连接请求
 				rsk = nsk;
 				goto reset;
 			}
@@ -1570,7 +1573,8 @@ int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
 		}
 	}
 
-	TCP_CHECK_TIMER(sk);
+	TCP_CHECK_TIMER(sk);//空语句
+	//处理其他状态下的包
 	if (tcp_rcv_state_process(sk, skb, tcp_hdr(skb), skb->len)) {
 		rsk = sk;
 		goto reset;
@@ -1579,9 +1583,9 @@ int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
 	return 0;
 
 reset:
-	tcp_v4_send_reset(rsk, skb);
-discard:
-	kfree_skb(skb);
+	tcp_v4_send_reset(rsk, skb);//向客户端发送RST包
+discard://丢弃处理
+	kfree_skb(skb);//释放数据包
 	/* Be careful here. If this function gets more complicated and
 	 * gcc suffers from register pressure on the x86, sk (in %ebx)
 	 * might be destroyed here. This current version compiles correctly,
@@ -1589,8 +1593,8 @@ discard:
 	 */
 	return 0;
 
-csum_err:
-	TCP_INC_STATS_BH(TCP_MIB_INERRS);
+csum_err://校验和错误处理
+	TCP_INC_STATS_BH(TCP_MIB_INERRS);//递增错误计数
 	goto discard;
 }
 
@@ -1604,53 +1608,58 @@ int tcp_v4_rcv(struct sk_buff *skb)
 	struct tcphdr *th;
 	struct sock *sk;
 	int ret;
-
+	//检查包类型，不是发送给本机得就丢弃
 	if (skb->pkt_type != PACKET_HOST)
 		goto discard_it;
 
 	/* Count it even if it's bad */
-	TCP_INC_STATS_BH(TCP_MIB_INSEGS);
+	TCP_INC_STATS_BH(TCP_MIB_INSEGS);//增加tcp_statistics中INSEGS计数。/proc/net/snmp
 
-	if (!pskb_may_pull(skb, sizeof(struct tcphdr)))
+	if (!pskb_may_pull(skb, sizeof(struct tcphdr)))//检查调整数据包的TCP头部
 		goto discard_it;
-
+	//获取tcp头部
 	th = tcp_hdr(skb);
-
+	//校验tcp头部长度
 	if (th->doff < sizeof(struct tcphdr) / 4)
 		goto bad_packet;
-	if (!pskb_may_pull(skb, th->doff * 4))
+	if (!pskb_may_pull(skb, th->doff * 4))//检查、调整数据包的TCP头部，这次包括TCP选项在内
 		goto discard_it;
 
 	/* An explanation is required here, I think.
 	 * Packet length and doff are validated by header prediction,
 	 * provided case of th->doff==0 is eliminated.
 	 * So, we defer the checks. */
+	//如果没有设置校验和就计算并初始化校验和
 	if (!skb_csum_unnecessary(skb) && tcp_v4_checksum_init(skb))
 		goto bad_packet;
-
+	//获取tcp头部，这次包括TCP选项
 	th = tcp_hdr(skb);
+	//ip头部
 	iph = ip_hdr(skb);
+	//将TCP头中重要信息保存到TCP_SKB_CB中
 	TCP_SKB_CB(skb)->seq = ntohl(th->seq);
 	TCP_SKB_CB(skb)->end_seq = (TCP_SKB_CB(skb)->seq + th->syn + th->fin +
-				    skb->len - th->doff * 4);
+				    skb->len - th->doff * 4);//FIXME: 这里的th->doff*4表示的选项头大小？
 	TCP_SKB_CB(skb)->ack_seq = ntohl(th->ack_seq);
 	TCP_SKB_CB(skb)->when	 = 0;
+	//FIXME: 为什么这里保存的是tos值？
 	TCP_SKB_CB(skb)->flags	 = iph->tos;
 	TCP_SKB_CB(skb)->sacked	 = 0;
-
+	//根据四元组从tcp_hashinfo中查找sk,优先查找established状态的sk，再查找listen状态的sk
 	sk = __inet_lookup(dev_net(skb->dev), &tcp_hashinfo, iph->saddr,
 			th->source, iph->daddr, th->dest, inet_iif(skb));
 	if (!sk)
 		goto no_tcp_socket;
 
 process:
-	if (sk->sk_state == TCP_TIME_WAIT)
+	//这里单独处理了time_wait状态的sk
+	if (sk->sk_state == TCP_TIME_WAIT)//sk处于time_wait状态
 		goto do_time_wait;
 
 	if (!xfrm4_policy_check(sk, XFRM_POLICY_IN, skb))
 		goto discard_and_relse;
 	nf_reset(skb);
-
+	//用户设置了SO_ATTACH_FILTER
 	if (sk_filter(sk, skb))
 		goto discard_and_relse;
 
@@ -1658,7 +1667,8 @@ process:
 
 	bh_lock_sock_nested(sk);
 	ret = 0;
-	if (!sock_owned_by_user(sk)) {
+	//除了time_wait状态的sk，都要调用tcp_v4_do_rcv()函数
+	if (!sock_owned_by_user(sk)) {//检查sock结构是否还可用
 #ifdef CONFIG_NET_DMA
 		struct tcp_sock *tp = tcp_sk(sk);
 		if (!tp->ucopy.dma_chan && tp->ucopy.pinned_list)
@@ -1668,35 +1678,35 @@ process:
 		else
 #endif
 		{
-			if (!tcp_prequeue(sk, skb))
-			ret = tcp_v4_do_rcv(sk, skb);
+			if (!tcp_prequeue(sk, skb))//链入预处理队列
+			ret = tcp_v4_do_rcv(sk, skb);//不链入预处理队列，直接处理数据包
 		}
 	} else
-		sk_add_backlog(sk, skb);
-	bh_unlock_sock(sk);
+		sk_add_backlog(sk, skb);//如果sock结构目前不可用，就将数据包链入后备队列
+	bh_unlock_sock(sk);//解锁
 
-	sock_put(sk);
+	sock_put(sk);//递减使用计数
 
 	return ret;
 
-no_tcp_socket:
+no_tcp_socket://没有找到接收的sock
 	if (!xfrm4_policy_check(NULL, XFRM_POLICY_IN, skb))
 		goto discard_it;
-
+	//如果数据块长度小于TCP头部长度或者校验和完整，则递增错误计数。
 	if (skb->len < (th->doff << 2) || tcp_checksum_complete(skb)) {
 bad_packet:
-		TCP_INC_STATS_BH(TCP_MIB_INERRS);
+		TCP_INC_STATS_BH(TCP_MIB_INERRS);//递增错误计数
 	} else {
-		tcp_v4_send_reset(NULL, skb);
+		tcp_v4_send_reset(NULL, skb);//向对端发送RST包
 	}
 
-discard_it:
+discard_it://丢弃数据包
 	/* Discard frame. */
-	kfree_skb(skb);
+	kfree_skb(skb);//释放数据包
 	return 0;
 
 discard_and_relse:
-	sock_put(sk);
+	sock_put(sk);//递减使用计数
 	goto discard_it;
 
 do_time_wait:

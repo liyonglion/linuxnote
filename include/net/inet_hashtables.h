@@ -100,7 +100,7 @@ struct inet_hashinfo {
 	 *
 	 * TIME_WAIT sockets use a separate chain (twchain).
 	 */
-	struct inet_ehash_bucket	*ehash;//已经建立连接的hash桶。key为四元组，value为struct sock指针对象
+	struct inet_ehash_bucket	*ehash;//连接的hash桶。key为四元组，value为struct sock指针对象。注意：这里是保存TCP_ESTABLISHED <= sk->sk_state < TCP_CLOSE状态的连接的sock信息。
 	rwlock_t			*ehash_locks;//队列锁
 	unsigned int			ehash_size;//队列长度
 	unsigned int			ehash_locks_mask;
@@ -108,7 +108,7 @@ struct inet_hashinfo {
 	/* Ok, let's try this, I give up, we do need a local binding
 	 * TCP hash as well as the others for fast bind/connect.
 	 */
-	struct inet_bind_hashbucket	*bhash;//管理端口号的哈希桶
+	struct inet_bind_hashbucket	*bhash;//管理端口号的哈希桶。客户端端口的哈希桶。key为客户端的端口号，为了可以通过端口号快速找到客户端的sock结构
 
 	unsigned int			bhash_size;//hash桶的长度
 	/* Note : 4 bytes padding on 64 bit arches */
@@ -349,8 +349,8 @@ static inline struct sock *__inet_lookup(struct net *net,
 {
 	u16 hnum = ntohs(dport);
 	struct sock *sk = __inet_lookup_established(net, hashinfo,
-				saddr, sport, daddr, hnum, dif);
-
+				saddr, sport, daddr, hnum, dif);//先在已经连接的sock队列中查找
+	//没有找到就在监听的sock队列中查找
 	return sk ? : __inet_lookup_listener(net, hashinfo, daddr, hnum, dif);
 }
 

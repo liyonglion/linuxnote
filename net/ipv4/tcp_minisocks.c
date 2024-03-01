@@ -100,7 +100,7 @@ tcp_timewait_state_process(struct inet_timewait_sock *tw, struct sk_buff *skb,
 {
 	struct tcp_timewait_sock *tcptw = tcp_twsk((struct sock *)tw);
 	struct tcp_options_received tmp_opt;
-	int paws_reject = 0;
+	int paws_reject = 0;//是否发生了时间戳回绕
 
 	tmp_opt.saw_tstamp = 0;
 	if (th->doff > (sizeof(*th) >> 2) && tcptw->tw_ts_recent_stamp) {
@@ -271,13 +271,14 @@ kill:
 /*
  * Move a socket to time-wait or dead fin-wait-2 state.
  */
+//这里的state标记我们是正常进入tw状态，还是由于死在fin-wait-2状态才进入tw状态的。  
 void tcp_time_wait(struct sock *sk, int state, int timeo)
 {
 	struct inet_timewait_sock *tw = NULL;
 	const struct inet_connection_sock *icsk = inet_csk(sk);
 	const struct tcp_sock *tp = tcp_sk(sk);
 	int recycle_ok = 0;
-
+	//如果 tw_recycle 、TCP Timestamp 开启，会先 Per-Host 的缓存连接最后一次收到数据的对方 TSval。
 	if (tcp_death_row.sysctl_tw_recycle && tp->rx_opt.ts_recent_stamp)
 		recycle_ok = icsk->icsk_af_ops->remember_stamp(sk);
 
@@ -384,9 +385,9 @@ static inline void TCP_ECN_openreq_child(struct tcp_sock *tp,
  */
 struct sock *tcp_create_openreq_child(struct sock *sk, struct request_sock *req, struct sk_buff *skb)
 {
-	struct sock *newsk = inet_csk_clone(sk, req, GFP_ATOMIC);
+	struct sock *newsk = inet_csk_clone(sk, req, GFP_ATOMIC);//克隆sock结构
 
-	if (newsk != NULL) {
+	if (newsk != NULL) {//克隆成功，根据连接请求结构的内容进一步初始化它
 		const struct inet_request_sock *ireq = inet_rsk(req);
 		struct tcp_request_sock *treq = tcp_rsk(req);
 		struct inet_connection_sock *newicsk = inet_csk(newsk);
@@ -656,7 +657,7 @@ struct sock *tcp_check_req(struct sock *sk,struct sk_buff *skb,
 		 * socket is created, wait for troubles.
 		 */
 		child = inet_csk(sk)->icsk_af_ops->syn_recv_sock(sk, skb,
-								 req, NULL);
+								 req, NULL);//创建代表客户端的sock结构，并初始化。tcp_v4_syn_recv_sock
 		if (child == NULL)
 			goto listen_overflow;
 #ifdef CONFIG_TCP_MD5SIG
@@ -684,10 +685,10 @@ struct sock *tcp_check_req(struct sock *sk,struct sk_buff *skb,
 		}
 #endif
 
-		inet_csk_reqsk_queue_unlink(sk, req, prev);
-		inet_csk_reqsk_queue_removed(sk, req);
+		inet_csk_reqsk_queue_unlink(sk, req, prev);//将连接从连接请求脱离队列
+		inet_csk_reqsk_queue_removed(sk, req);//递减监听结构计数器，从半连接队列中删除，并摘取sock定时器
 
-		inet_csk_reqsk_queue_add(sk, req, child);
+		inet_csk_reqsk_queue_add(sk, req, child);//加入到全连接队列中
 		return child;
 
 	listen_overflow:
@@ -715,20 +716,20 @@ int tcp_child_process(struct sock *parent, struct sock *child,
 		      struct sk_buff *skb)
 {
 	int ret = 0;
-	int state = child->sk_state;
+	int state = child->sk_state;//获取客户端sock状态，前面克隆服务器的sock设置为SYN_RECV状态
 
-	if (!sock_owned_by_user(child)) {
+	if (!sock_owned_by_user(child)) {//检查客户端的sock结构是否可用
 		ret = tcp_rcv_state_process(child, skb, tcp_hdr(skb),
-					    skb->len);
+					    skb->len);//根据sock状态处理数据包
 		/* Wakeup parent, send SIGIO */
-		if (state == TCP_SYN_RECV && child->sk_state != state)
-			parent->sk_data_ready(parent, 0);
+		if (state == TCP_SYN_RECV && child->sk_state != state)//如果客户端sock状态改变了，也就说明3次握手成功完成。
+			parent->sk_data_ready(parent, 0);//唤醒进程处理连接请求。sock_def_readable
 	} else {
 		/* Alas, it is possible again, because we do lookup
 		 * in main socket hash table and lock on listening
 		 * socket does not protect us more.
 		 */
-		sk_add_backlog(child, skb);
+		sk_add_backlog(child, skb);//放入到后备队列中
 	}
 
 	bh_unlock_sock(child);

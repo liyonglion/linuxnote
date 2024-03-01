@@ -195,7 +195,7 @@ struct sock_common {
   *	@sk_backlog_rcv: callback to process the backlog
   *	@sk_destruct: called at sock freeing time, i.e. when all refcnt == 0
  */
-struct sock {
+struct sock {//tcp传输控制信息，描述tcp的自有特性，包括：接受、发送窗口，拥塞控制信息，tcp连接请求信息，rtt等信息。tcp_init_sock中完成该结构的初始化.该结构的创建在inet_create中。
 	/*
 	 * Now struct inet_timewait_sock also uses sock_common, so please just
 	 * don't add nothing before this first member (__sk_common) --acme
@@ -256,7 +256,7 @@ struct sock {
 				sk_err_soft; //持续出现的错误
 	atomic_t		sk_drops; //原始socket发送计数器
 	unsigned short		sk_ack_backlog; //当前监听的连接数量。全连接队列当前长度
-	unsigned short		sk_max_ack_backlog; //在 listen()中监听到的连接数量
+	unsigned short		sk_max_ack_backlog; //在 listen()中监听到的连接数量。全连接最大长度
 	__u32			sk_priority; //优先级
 	struct ucred		sk_peercred; //SO_PEERCRED 设置
 	long			sk_rcvtimeo; //SO_RCVTIMEO设置

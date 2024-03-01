@@ -122,7 +122,7 @@ struct socket {
 	struct file		*file; //socket关联的文件指针
 	struct sock		*sk; //代表具体协议类型。socket是BSD的抽象，sock是TCP层的抽象
 	wait_queue_head_t	wait; //等待队列
-	short			type; //socket类型
+	short			type; //socket类型。SOCKET_STREAM、SOCKET_DGRAM、SOCKET_RAW、SOCKET_RDM、SOCKET_SEQPACKET、SOCKET_DCCP、SOCKET_PACKET等
 };
 
 struct vm_area_struct;

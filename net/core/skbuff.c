@@ -185,17 +185,17 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	struct skb_shared_info *shinfo;
 	struct sk_buff *skb;
 	u8 *data;
-
+	//确认使用哪种告诉缓存区
 	cache = fclone ? skbuff_fclone_cache : skbuff_head_cache;
 
-	/* Get the HEAD */
+	/* Get the HEAD 分配数据包的空间，不包含数据块*/
 	skb = kmem_cache_alloc_node(cache, gfp_mask & ~__GFP_DMA, node);
 	if (!skb)
 		goto out;
 
-	size = SKB_DATA_ALIGN(size);
+	size = SKB_DATA_ALIGN(size);//数据块长度按照高速缓存行对齐
 	data = kmalloc_node_track_caller(size + sizeof(struct skb_shared_info),
-			gfp_mask, node);
+			gfp_mask, node);//分配数据块和共享结构空间，返回超始地址
 	if (!data)
 		goto nodata;
 
@@ -204,31 +204,31 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	 * actually initialise below. Hence, don't put any more fields after
 	 * the tail pointer in struct sk_buff!
 	 */
-	memset(skb, 0, offsetof(struct sk_buff, tail));
-	skb->truesize = size + sizeof(struct sk_buff);
-	atomic_set(&skb->users, 1);
-	skb->head = data;
-	skb->data = data;
-	skb_reset_tail_pointer(skb);
-	skb->end = skb->tail + size;
+	memset(skb, 0, offsetof(struct sk_buff, tail));//清零 tail到结构头之间的内容
+	skb->truesize = size + sizeof(struct sk_buff);//实际尺寸包括结构和缓冲块大小
+	atomic_set(&skb->users, 1);//设置使用计数
+	skb->head = data;//新分配空间的起始地址为缓冲块起始地址
+	skb->data = data;//数据块起始地址等于缓冲块起始地址
+	skb_reset_tail_pointer(skb);//数据块结束地址等于起始地址
+	skb->end = skb->tail + size;//缓冲块结束地址等于新分配空间的结束地址，实际指向了共享数据结构，它紧跟在缓冲块后边
 	/* make sure we initialize shinfo sequentially */
-	shinfo = skb_shinfo(skb);
-	atomic_set(&shinfo->dataref, 1);
-	shinfo->nr_frags  = 0;
-	shinfo->gso_size = 0;
-	shinfo->gso_segs = 0;
-	shinfo->gso_type = 0;
-	shinfo->ip6_frag_id = 0;
-	shinfo->frag_list = NULL;
+	shinfo = skb_shinfo(skb);//根据缓冲块结束地址获取共享数据结构指针
+	atomic_set(&shinfo->dataref, 1);;//设置数据块的使用计数
+	shinfo->nr_frags  = 0;//分散数据块的总数
+	shinfo->gso_size = 0;//分段数据包的大小
+	shinfo->gso_segs = 0;//分段数据包总数
+	shinfo->gso_type = 0;//分段数据包的类型
+	shinfo->ip6_frag_id = 0;//IPv6使用，不关心
+	shinfo->frag_list = NULL;//分段数据包队列
 
 	if (fclone) {
-		struct sk_buff *child = skb + 1;
-		atomic_t *fclone_ref = (atomic_t *) (child + 1);
+		struct sk_buff *child = skb + 1;//指向克隆数据包结构
+		atomic_t *fclone_ref = (atomic_t *) (child + 1);//取得数据包后的计数器
 
-		skb->fclone = SKB_FCLONE_ORIG;
+		skb->fclone = SKB_FCLONE_ORIG;//设置克隆标志位
 		atomic_set(fclone_ref, 1);
 
-		child->fclone = SKB_FCLONE_UNAVAILABLE;
+		child->fclone = SKB_FCLONE_UNAVAILABLE;//设置克隆数据包未使用标志
 	}
 out:
 	return skb;

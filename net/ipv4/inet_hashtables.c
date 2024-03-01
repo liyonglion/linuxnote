@@ -95,8 +95,8 @@ EXPORT_SYMBOL(inet_put_port);
 
 void __inet_inherit_port(struct sock *sk, struct sock *child)
 {
-	struct inet_hashinfo *table = sk->sk_prot->h.hashinfo;
-	const int bhash = inet_bhashfn(inet_sk(child)->num, table->bhash_size);
+	struct inet_hashinfo *table = sk->sk_prot->h.hashinfo;//获取tcp_hashinfo结构
+	const int bhash = inet_bhashfn(inet_sk(child)->num, table->bhash_size);//计算hash值，在端口号的hash桶中。之所以加入到bhash中，是为了以后可以根据端口号快速索引到这个sock结构
 	struct inet_bind_hashbucket *head = &table->bhash[bhash];
 	struct inet_bind_bucket *tb;
 
@@ -117,24 +117,24 @@ EXPORT_SYMBOL_GPL(__inet_inherit_port);
  * exclusive lock release). It should be ifdefed really.
  */
 void inet_listen_wlock(struct inet_hashinfo *hashinfo)
-	__acquires(hashinfo->lhash_lock)
+	__acquires(hashinfo->lhash_lock)//检测目的
 {
-	write_lock(&hashinfo->lhash_lock);
+	write_lock(&hashinfo->lhash_lock);//加锁
 
-	if (atomic_read(&hashinfo->lhash_users)) {
-		DEFINE_WAIT(wait);
-
+	if (atomic_read(&hashinfo->lhash_users)) {//hash队列正在使用中
+		DEFINE_WAIT(wait);//声明当前进程的等待队列头
+		//循环睡眠，知道hash结构可以使用为止
 		for (;;) {
 			prepare_to_wait_exclusive(&hashinfo->lhash_wait,
 						  &wait, TASK_UNINTERRUPTIBLE);
-			if (!atomic_read(&hashinfo->lhash_users))
+			if (!atomic_read(&hashinfo->lhash_users))//hash结构可用，跳出循环
 				break;
-			write_unlock_bh(&hashinfo->lhash_lock);
-			schedule();
-			write_lock_bh(&hashinfo->lhash_lock);
+			write_unlock_bh(&hashinfo->lhash_lock);//解锁
+			schedule();//调度
+			write_lock_bh(&hashinfo->lhash_lock);//加锁
 		}
-
-		finish_wait(&hashinfo->lhash_wait, &wait);
+		//到这，说明hash结构可以使用了，将当前进程的等待队列头从等待队列中脱链
+		finish_wait(&hashinfo->lhash_wait, &wait);//设置当前进程为可运行状态
 	}
 }
 
@@ -193,20 +193,20 @@ struct sock *__inet_lookup_listener(struct net *net,
 	const struct hlist_head *head;
 
 	read_lock(&hashinfo->lhash_lock);
-	head = &hashinfo->listening_hash[inet_lhashfn(hnum)];
-	if (!hlist_empty(head)) {
-		const struct inet_sock *inet = inet_sk((sk = __sk_head(head)));
+	head = &hashinfo->listening_hash[inet_lhashfn(hnum)];//获取对应监听端口的队列头
+	if (!hlist_empty(head)) {//如果不为空
+		const struct inet_sock *inet = inet_sk((sk = __sk_head(head)));//获取sock结构和inet_sock结构指针
 
-		if (inet->num == hnum && !sk->sk_node.next &&
-		    (!inet->rcv_saddr || inet->rcv_saddr == daddr) &&
-		    (sk->sk_family == PF_INET || !ipv6_only_sock(sk)) &&
-		    !sk->sk_bound_dev_if && net_eq(sock_net(sk), net))
+		if (inet->num == hnum && !sk->sk_node.next &&//对比端口值
+		    (!inet->rcv_saddr || inet->rcv_saddr == daddr) &&//对比地址
+		    (sk->sk_family == PF_INET || !ipv6_only_sock(sk)) &&//对比协议族
+		    !sk->sk_bound_dev_if && net_eq(sock_net(sk), net))//对比设备和网络空间
 			goto sherry_cache;
-		sk = inet_lookup_listener_slow(net, head, daddr, hnum, dif);
+		sk = inet_lookup_listener_slow(net, head, daddr, hnum, dif);//循环在队列中查找
 	}
-	if (sk) {
+	if (sk) {//找到符合要求的sock结构
 sherry_cache:
-		sock_hold(sk);
+		sock_hold(sk);//递增使用计数
 	}
 	read_unlock(&hashinfo->lhash_lock);
 	return sk;
@@ -219,37 +219,37 @@ struct sock * __inet_lookup_established(struct net *net,
 				  const __be32 daddr, const u16 hnum,
 				  const int dif)
 {
-	INET_ADDR_COOKIE(acookie, saddr, daddr)
-	const __portpair ports = INET_COMBINED_PORTS(sport, hnum);
+	INET_ADDR_COOKIE(acookie, saddr, daddr)//该宏在32位系统中为空
+	const __portpair ports = INET_COMBINED_PORTS(sport, hnum);//端口值组合
 	struct sock *sk;
 	const struct hlist_node *node;
 	/* Optimize here for direct hit, only listening connections can
 	 * have wildcards anyways.
 	 */
-	unsigned int hash = inet_ehashfn(daddr, hnum, saddr, sport);
-	struct inet_ehash_bucket *head = inet_ehash_bucket(hashinfo, hash);
-	rwlock_t *lock = inet_ehash_lockp(hashinfo, hash);
+	unsigned int hash = inet_ehashfn(daddr, hnum, saddr, sport);//计算hash值
+	struct inet_ehash_bucket *head = inet_ehash_bucket(hashinfo, hash);//计算hash桶
+	rwlock_t *lock = inet_ehash_lockp(hashinfo, hash);//获取队列锁
 
 	prefetch(head->chain.first);
 	read_lock(lock);
-	sk_for_each(sk, node, &head->chain) {
+	sk_for_each(sk, node, &head->chain) {//在已连接的sock队列中查找
 		if (INET_MATCH(sk, net, hash, acookie,
-					saddr, daddr, ports, dif))
+					saddr, daddr, ports, dif))//比对hash值、网络空间、地址、端口等内容
 			goto hit; /* You sunk my battleship! */
 	}
 
 	/* Must check for a TIME_WAIT'er before going to listener hash. */
-	sk_for_each(sk, node, &head->twchain) {
+	sk_for_each(sk, node, &head->twchain) {//在TIME_WAIT状态的sock队列中查找
 		if (INET_TW_MATCH(sk, net, hash, acookie,
 					saddr, daddr, ports, dif))
 			goto hit;
 	}
-	sk = NULL;
+	sk = NULL;//到达此处说明没有没到，置空指针
 out:
 	read_unlock(lock);
 	return sk;
-hit:
-	sock_hold(sk);
+hit://命中
+	sock_hold(sk);//递增使用计数，返回struct sock指针
 	goto out;
 }
 EXPORT_SYMBOL_GPL(__inet_lookup_established);
@@ -259,25 +259,25 @@ static int __inet_check_established(struct inet_timewait_death_row *death_row,
 				    struct sock *sk, __u16 lport,
 				    struct inet_timewait_sock **twp)
 {
-	struct inet_hashinfo *hinfo = death_row->hashinfo;
+	struct inet_hashinfo *hinfo = death_row->hashinfo;//全局hash桶信息
 	struct inet_sock *inet = inet_sk(sk);
 	__be32 daddr = inet->rcv_saddr;
 	__be32 saddr = inet->daddr;
 	int dif = sk->sk_bound_dev_if;
 	INET_ADDR_COOKIE(acookie, saddr, daddr)
 	const __portpair ports = INET_COMBINED_PORTS(inet->dport, lport);
-	unsigned int hash = inet_ehashfn(daddr, lport, saddr, inet->dport);
-	struct inet_ehash_bucket *head = inet_ehash_bucket(hinfo, hash);
-	rwlock_t *lock = inet_ehash_lockp(hinfo, hash);
+	unsigned int hash = inet_ehashfn(daddr, lport, saddr, inet->dport);//计算hash值
+	struct inet_ehash_bucket *head = inet_ehash_bucket(hinfo, hash);//找到hash桶
+	rwlock_t *lock = inet_ehash_lockp(hinfo, hash);//获取队列锁
 	struct sock *sk2;
 	const struct hlist_node *node;
 	struct inet_timewait_sock *tw;
 	struct net *net = sock_net(sk);
 
 	prefetch(head->chain.first);
-	write_lock(lock);
+	write_lock(lock);//上锁
 
-	/* Check TIME-WAIT sockets first. */
+	/* Check TIME-WAIT sockets first. 检查time_wait队列*/
 	sk_for_each(sk2, node, &head->twchain) {
 		tw = inet_twsk(sk2);
 
@@ -291,7 +291,7 @@ static int __inet_check_established(struct inet_timewait_death_row *death_row,
 	}
 	tw = NULL;
 
-	/* And established part... */
+	/* And established part... 遍历已连接的sock队列*/
 	sk_for_each(sk2, node, &head->chain) {
 		if (INET_MATCH(sk2, net, hash, acookie,
 					saddr, daddr, ports, dif))
@@ -305,7 +305,7 @@ unique:
 	inet->sport = htons(lport);
 	sk->sk_hash = hash;
 	BUG_TRAP(sk_unhashed(sk));
-	__sk_add_node(sk, &head->chain);
+	__sk_add_node(sk, &head->chain);//将sk加入到对应桶链中
 	sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
 	write_unlock(lock);
 
@@ -336,36 +336,36 @@ static inline u32 inet_sk_port_offset(const struct sock *sk)
 
 void __inet_hash_nolisten(struct sock *sk)
 {
-	struct inet_hashinfo *hashinfo = sk->sk_prot->h.hashinfo;
+	struct inet_hashinfo *hashinfo = sk->sk_prot->h.hashinfo;//获取tcp_hashinfo结构
 	struct hlist_head *list;
 	rwlock_t *lock;
 	struct inet_ehash_bucket *head;
 
 	BUG_TRAP(sk_unhashed(sk));
 
-	sk->sk_hash = inet_sk_ehashfn(sk);
-	head = inet_ehash_bucket(hashinfo, sk->sk_hash);
-	list = &head->chain;
-	lock = inet_ehash_lockp(hashinfo, sk->sk_hash);
+	sk->sk_hash = inet_sk_ehashfn(sk);//计算hash值
+	head = inet_ehash_bucket(hashinfo, sk->sk_hash);//获取哈希桶
+	list = &head->chain;//已连接的sock队列
+	lock = inet_ehash_lockp(hashinfo, sk->sk_hash);//获取对应的锁
 
-	write_lock(lock);
-	__sk_add_node(sk, list);
-	sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
-	write_unlock(lock);
+	write_lock(lock);//加锁
+	__sk_add_node(sk, list);//将sock结构链入到已经连接的队列中
+	sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);//增加计数
+	write_unlock(lock);//解锁
 }
 EXPORT_SYMBOL_GPL(__inet_hash_nolisten);
 
-static void __inet_hash(struct sock *sk)
+static void __inet_hash(struct sock *sk)//将sk加入到hashinfo中对应队列：对于TCP_LISTEN状态的sock，加入监听队列中。其他加入到已连接的队列中
 {
 	struct inet_hashinfo *hashinfo = sk->sk_prot->h.hashinfo;
 	struct hlist_head *list;
 	rwlock_t *lock;
 
 	if (sk->sk_state != TCP_LISTEN) {
-		__inet_hash_nolisten(sk);
+		__inet_hash_nolisten(sk);//加入到已连接的队列中
 		return;
 	}
-
+	//加入到监听队列中
 	BUG_TRAP(sk_unhashed(sk));
 	list = &hashinfo->listening_hash[inet_sk_listen_hashfn(sk)];
 	lock = &hashinfo->lhash_lock;
@@ -419,26 +419,28 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 			struct sock *, __u16, struct inet_timewait_sock **),
 		void (*hash)(struct sock *sk))
 {
+	//全局的hash队列信息
 	struct inet_hashinfo *hinfo = death_row->hashinfo;
-	const unsigned short snum = inet_sk(sk)->num;
+	const unsigned short snum = inet_sk(sk)->num;//源端口号
 	struct inet_bind_hashbucket *head;
 	struct inet_bind_bucket *tb;
 	int ret;
 	struct net *net = sock_net(sk);
 
-	if (!snum) {
+	if (!snum) {//没有指定源端口号，则需要分配一个随机端口号
 		int i, remaining, low, high, port;
 		static u32 hint;
 		u32 offset = hint + port_offset;
 		struct hlist_node *node;
 		struct inet_timewait_sock *tw = NULL;
-
+		//确定端口号范围
 		inet_get_local_port_range(&low, &high);
 		remaining = (high - low) + 1;
 
 		local_bh_disable();
 		for (i = 1; i <= remaining; i++) {
 			port = low + (i + offset) % remaining;
+			//bind hash桶
 			head = &hinfo->bhash[inet_bhashfn(port, hinfo->bhash_size)];
 			spin_lock(&head->lock);
 
@@ -446,18 +448,18 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 			 * because the established check is already
 			 * unique enough.
 			 */
-			inet_bind_bucket_for_each(tb, node, &head->chain) {
+			inet_bind_bucket_for_each(tb, node, &head->chain) {//在桶中查找该端口是否被占用
 				if (tb->ib_net == net && tb->port == port) {
 					BUG_TRAP(!hlist_empty(&tb->owners));
 					if (tb->fastreuse >= 0)
 						goto next_port;
 					if (!check_established(death_row, sk,
-								port, &tw))
+								port, &tw))//是否存在相同的四元组连接，没有说明该端口号可用。在check_established中会将sk加入到ehash表中。
 						goto ok;
 					goto next_port;
 				}
 			}
-
+			//走到这里说明在所有桶中没有找到该端口号，则创建一个绑定的桶用于存储该端口号
 			tb = inet_bind_bucket_create(hinfo->bind_bucket_cachep,
 					net, head, port);
 			if (!tb) {
@@ -477,11 +479,11 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 ok:
 		hint += i;
 
-		/* Head lock still held and bh's disabled */
+		/* Head lock still held and bh's disabled 将port放入到对于的bind桶中*/
 		inet_bind_hash(sk, tb, port);
-		if (sk_unhashed(sk)) {
+		if (sk_unhashed(sk)) {//sk结构是否已经链入了hash桶中，通过检查hash节点来判断
 			inet_sk(sk)->sport = htons(port);
-			hash(sk);
+			hash(sk);//将sk加入到tcp_hashinfo->ehash中
 		}
 		spin_unlock(&head->lock);
 
@@ -493,7 +495,7 @@ ok:
 		ret = 0;
 		goto out;
 	}
-
+	//用户指定了bind的端口号
 	head = &hinfo->bhash[inet_bhashfn(snum, hinfo->bhash_size)];
 	tb  = inet_csk(sk)->icsk_bind_hash;
 	spin_lock_bh(&head->lock);
@@ -512,7 +514,7 @@ out:
 }
 
 /*
- * Bind a port for a connect operation and hash it.
+ * Bind a port for a connect operation and hash it.在__inet_check_established中会将sk加入到ehash中
  */
 int inet_hash_connect(struct inet_timewait_death_row *death_row,
 		      struct sock *sk)

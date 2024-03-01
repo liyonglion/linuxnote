@@ -63,17 +63,17 @@ struct inet_request_sock {
 	u16			inet6_rsk_offset;
 	/* 2 bytes hole, try to pack */
 #endif
-	__be32			loc_addr;
-	__be32			rmt_addr;
-	__be16			rmt_port;
-	u16			snd_wscale : 4, 
-				rcv_wscale : 4, 
-				tstamp_ok  : 1,
-				sack_ok	   : 1,
-				wscale_ok  : 1,
-				ecn_ok	   : 1,
+	__be32			loc_addr;//本地地址
+	__be32			rmt_addr;//远程地址
+	__be16			rmt_port;//远程端口
+	u16			snd_wscale : 4, //客户端的窗口扩大因子
+				rcv_wscale : 4, //服务器端的窗口扩大因子
+				tstamp_ok  : 1,//表示本连接的连接是否支持时间戳
+				sack_ok	   : 1,//标识本链接是否支持SACK选项
+				wscale_ok  : 1,//标识本连接是否支持window Scale选项
+				ecn_ok	   : 1,//标识本连接是否支持ECN选项
 				acked	   : 1;
-	struct ip_options	*opt;
+	struct ip_options	*opt; //IP头选项相关
 };
 
 static inline struct inet_request_sock *inet_rsk(const struct request_sock *sk)
@@ -104,7 +104,7 @@ struct rtable;
  * @mc_list - Group array
  * @cork - info to build ip hdr on each ip frag while socket is corked
  */
-struct inet_sock {
+struct inet_sock {//inet协议族结构。描述ip协议的通用传输控制信息，相比sock增加了套接字地址、端口等信息。
 	/* sk and pinet6 has to be the first two members of inet_sock */
 	struct sock		sk;
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
@@ -114,33 +114,33 @@ struct inet_sock {
 	__be32			daddr; //目标地址
 	__be32			rcv_saddr;//用户配置的监听地址，在inet_bind()中赋值
 	__be16			dport;//目标端口
-	__u16			num; 
+	__u16			num; //绑定端口号，在connect流程中，表示筛选出来的端口号
 	__be32			saddr;//源地址。在bind过程中，rcv_saddr = saddr
-	__s16			uc_ttl; //TTL
+	__s16			uc_ttl; //单播TTL
 	__u16			cmsg_flags;
 	struct ip_options	*opt;
 	__be16			sport;//绑定端口号
 	__u16			id;
 	__u8			tos;
-	__u8			mc_ttl;
+	__u8			mc_ttl;//组播TTL
 	__u8			pmtudisc;//是否按照MTU分包
 	__u8			recverr:1,
 				is_icsk:1, //标识是否是inet_connection_sock类型
 				freebind:1,
 				hdrincl:1,
 				mc_loop:1;
-	int			mc_index;
-	__be32			mc_addr;
-	struct ip_mc_socklist	*mc_list;
+	int			mc_index;//组播设备索引
+	__be32			mc_addr;//组播地址
+	struct ip_mc_socklist	*mc_list;//组播表
 	struct {
 		unsigned int		flags;
-		unsigned int		fragsize;
-		struct ip_options	*opt;
-		struct dst_entry	*dst;
+		unsigned int		fragsize;//IP分片大小
+		struct ip_options	*opt;//IP选项
+		struct dst_entry	*dst;//路由缓存项
 		int			length; /* Total length of all frames */
 		__be32			addr;
-		struct flowi		fl;
-	} cork;
+		struct flowi		fl;//路由查找项
+	} cork;//这些信息用于每个IP片段建立IP头部时使用
 };
 
 #define IPCORK_OPT	1	/* ip-options has been held in ipcork.opt */

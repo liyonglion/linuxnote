@@ -1420,9 +1420,9 @@ static __u32 twothirdsMD4Transform(__u32 const buf[4], __u32 const in[12])
 static struct keydata {
 	__u32 count; /* already shifted to the final position */
 	__u32 secret[12];
-} ____cacheline_aligned ip_keydata[2];
+} ____cacheline_aligned ip_keydata[2];//这里是一个2个元素的数组，是为了保证线程安全
 
-static unsigned int ip_cnt;
+static unsigned int ip_cnt;//当前使用上面的数组的下标
 
 static void rekey_seq_generator(struct work_struct *work);
 
@@ -1439,12 +1439,14 @@ static DECLARE_DELAYED_WORK(rekey_work, rekey_seq_generator);
  * that processes SYN requests for more than 5 minutes. Should never
  * happen, and even if that happens only a not perfectly compliant
  * ISN is generated, nothing fatal.
+ 这里将在内核的工作队列中添加一个工作，这个工作就是每隔REKEY_INTERVAL时间之后，从新增加一下ip_cnt的值，注意，这个值和是否有报文发送没有关系。
+ 当前值是每隔五分钟更新一次。
  */
 static void rekey_seq_generator(struct work_struct *work)
 {
 	struct keydata *keyptr = &ip_keydata[1 ^ (ip_cnt & 1)];
 
-	get_random_bytes(keyptr->secret, sizeof(keyptr->secret));
+	get_random_bytes(keyptr->secret, sizeof(keyptr->secret));//生成随机数
 	keyptr->count = (ip_cnt & COUNT_MASK) << HASH_BITS;
 	smp_wmb();
 	ip_cnt++;
@@ -1517,13 +1519,13 @@ __u32 secure_ip_id(__be32 daddr)
 }
 
 #ifdef CONFIG_INET
-
+//计算一个seq号
 __u32 secure_tcp_sequence_number(__be32 saddr, __be32 daddr,
 				 __be16 sport, __be16 dport)
 {
 	__u32 seq;
-	__u32 hash[4];
-	struct keydata *keyptr = get_keyptr();
+	__u32 hash[4];//hash值
+	struct keydata *keyptr = get_keyptr();//可以理解成随机因子
 
 	/*
 	 *  Pick a unique starting offset for each TCP connection endpoints
@@ -1535,7 +1537,7 @@ __u32 secure_tcp_sequence_number(__be32 saddr, __be32 daddr,
 	hash[1] = (__force u32)daddr;
 	hash[2] = ((__force u16)sport << 16) + (__force u16)dport;
 	hash[3] = keyptr->secret[11];
-
+	//md4生成一个初始seq号
 	seq = half_md4_transform(hash, keyptr->secret) & HASH_MASK;
 	seq += keyptr->count;
 	/*

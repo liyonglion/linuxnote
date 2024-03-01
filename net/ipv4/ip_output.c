@@ -146,12 +146,12 @@ int ip_build_and_send_pkt(struct sk_buff *skb, struct sock *sk,
 	struct iphdr *iph;
 
 	/* Build the IP header. */
-	skb_push(skb, sizeof(struct iphdr) + (opt ? opt->optlen : 0));
-	skb_reset_network_header(skb);
-	iph = ip_hdr(skb);
-	iph->version  = 4;
-	iph->ihl      = 5;
-	iph->tos      = inet->tos;
+	skb_push(skb, sizeof(struct iphdr) + (opt ? opt->optlen : 0));//在数据块中开辟IP层空间
+	skb_reset_network_header(skb);//记录IP头位置
+	iph = ip_hdr(skb);//获取IP头
+	iph->version  = 4;//设置版本号
+	iph->ihl      = 5;//设置IP头部长度
+	iph->tos      = inet->tos;//设置TOS值
 	if (ip_dont_fragment(sk, &rt->u.dst))
 		iph->frag_off = htons(IP_DF);
 	else
@@ -171,7 +171,7 @@ int ip_build_and_send_pkt(struct sk_buff *skb, struct sock *sk,
 	skb->mark = sk->sk_mark;
 
 	/* Send it out. */
-	return ip_local_out(skb);
+	return ip_local_out(skb);//发送数据包。发送的syn+ack包在对端协议栈tcp_rcv_state_process函数中进行处理
 }
 
 EXPORT_SYMBOL_GPL(ip_build_and_send_pkt);

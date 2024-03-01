@@ -27,31 +27,42 @@ struct dst_entry;
 struct proto;
 
 struct request_sock_ops {
-	int		family;
-	int		obj_size;
-	struct kmem_cache	*slab;
+	int		family;//所属协议族
+	int		obj_size;//连接请求块的大小
+	struct kmem_cache	*slab;//连接请求的高速缓存
+	//SYN+ACK段重传时调用该函数
 	int		(*rtx_syn_ack)(struct sock *sk,
 				       struct request_sock *req);
+	//发送ack段时调用该函数				   
 	void		(*send_ack)(struct sk_buff *skb,
 				    struct request_sock *req);
+	//发送RST段时调用该函数				
 	void		(*send_reset)(struct sock *sk,
 				      struct sk_buff *skb);
+	//析构函数				  
 	void		(*destructor)(struct request_sock *req);
 };
 
 /* struct request_sock - mini sock to represent a connection request
+在完成三次握手前，连接都用request_sock结构表示，为了减小内存的占用
  */
-struct request_sock {
+struct request_sock {//如果是接收握手请求，那么会建立request_sock 做为一个mini sock，request_sock_ops操作函数则在proto结构体中初始化。tcp协议的request_sock_ops为tcp_request_sock_ops，此为变量名。
+	//和其它struct request_sock 对象形成链表
 	struct request_sock		*dl_next; /* Must be first member! */
+	//syn段中的客户端通告的MSS
 	u16				mss;
+	//syn+ack 段已经重传的次数，初始化为0
 	u8				retrans;
 	u8				cookie_ts; /* syncookie: encode tcpopts in timestamp */
 	/* The following two fields can be easily recomputed I think -AK */
-	u32				window_clamp; /* window clamp at creation time */
-	u32				rcv_wnd;	  /* rcv_wnd offered first time */
+	u32				window_clamp; /* window clamp at creation time 发送窗口大小*/
+	u32				rcv_wnd;	  /* rcv_wnd offered first time接收窗口大小 */
 	u32				ts_recent;
+	//SYN+ACK段的超时时间
 	unsigned long			expires;
+	//指向tcp_request_sock_ops，该函数集用于处理第三次握手的ACK段以及后续accept过程中struct tcp_sock对象的创建
 	const struct request_sock_ops	*rsk_ops;
+	//连接建立前无效，建立后指向创建的tcp_sock结构
 	struct sock			*sk;
 	u32				secid;
 	u32				peer_secid;
@@ -85,13 +96,20 @@ extern int sysctl_max_syn_backlog;
  * @max_qlen_log - log_2 of maximal queued SYNs/REQUESTs
  */
 struct listen_sock {
+	//其取值为nr_table_entries以2为底的对数
 	u8			max_qlen_log;
 	/* 3 bytes hole, try to use */
+	//当前syn_table哈希表中套接字的数据，即有多少个半连接套接字
 	int			qlen;
+	//服务器端会超时重传syn+ack段，该变量记录了那些还未重传过SYN+ACK段的套接字个数
 	int			qlen_young;
+	
 	int			clock_hand;
+	//用于随机访问listen_opt哈希表时计算hash值
 	u32			hash_rnd;
+	//syn_table哈希表的桶大小，该值和listen系统调用的backlog参数有关
 	u32			nr_table_entries;
+	//半连接套接字hash表，管理的元素就是连接请求块
 	struct request_sock	*syn_table[0];
 };
 
@@ -112,11 +130,15 @@ struct listen_sock {
  * are always protected from the main sock lock.
  */
 struct request_sock_queue {
+	//head和tail用于维护已经完成三次握手、等待用户程序accept的套接字，即全连接队列
 	struct request_sock	*rskq_accept_head;
 	struct request_sock	*rskq_accept_tail;
+	//用于同步对listen_opt的操作
 	rwlock_t		syn_wait_lock;
+	//于TCP选项TCP_DEFER_ACCEPT相关
 	u8			rskq_defer_accept;
 	/* 3 bytes hole, try to pack */
+	/* 已经收到syn，但是尚未完成三次握手的套接字保存在这个结构中，即半连接队列*/
 	struct listen_sock	*listen_opt;
 };
 
@@ -187,8 +209,8 @@ static inline struct sock *reqsk_queue_get_child(struct request_sock_queue *queu
 
 	BUG_TRAP(child != NULL);
 
-	sk_acceptq_removed(parent);
-	__reqsk_free(req);
+	sk_acceptq_removed(parent);//从全连接队列中删除
+	__reqsk_free(req);//释放request_sock结构
 	return child;
 }
 
