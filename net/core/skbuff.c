@@ -1181,72 +1181,72 @@ pull_pages:
 int skb_copy_bits(const struct sk_buff *skb, int offset, void *to, int len)
 {
 	int i, copy;
-	int start = skb_headlen(skb);
+	int start = skb_headlen(skb);//主数据包的基本数据块长度(主数据块减去分散数据块总长度和分段数据块总长度)
 
-	if (offset > (int)skb->len - len)
+	if (offset > (int)skb->len - len)//复制范围超出了主数据块长度，出错返回
 		goto fault;
 
-	/* Copy header. */
-	if ((copy = start - offset) > 0) {
-		if (copy > len)
-			copy = len;
-		skb_copy_from_linear_data_offset(skb, offset, to, copy);
-		if ((len -= copy) == 0)
+	/* Copy header.先复制基本数据块的内容 */
+	if ((copy = start - offset) > 0) {//计算复制的长度
+		if (copy > len)//如果大于指定长度
+			copy = len;//以指定长度作为复制长度
+		skb_copy_from_linear_data_offset(skb, offset, to, copy);//按长度复制基本数据块内容存放到分段数据包的数据块中
+		if ((len -= copy) == 0)//如果复制完成,就返回了
 			return 0;
-		offset += copy;
-		to     += copy;
+		offset += copy;//调整复制位置
+		to     += copy;//调整存放位置
 	}
-
+	//到这里说明还没有全部复制完成，需要复制分散数据块
 	for (i = 0; i < skb_shinfo(skb)->nr_frags; i++) {
 		int end;
 
-		BUG_TRAP(start <= offset + len);
+		BUG_TRAP(start <= offset + len);//检查是否出错
 
-		end = start + skb_shinfo(skb)->frags[i].size;
-		if ((copy = end - offset) > 0) {
+		end = start + skb_shinfo(skb)->frags[i].size;//基本数据块加分散数据块作为当前复制终点
+		if ((copy = end - offset) > 0) {//计算复制长度
 			u8 *vaddr;
 
-			if (copy > len)
-				copy = len;
+			if (copy > len)//如果超过指定长度
+				copy = len;//以指定长度为复制长度
 
-			vaddr = kmap_skb_frag(&skb_shinfo(skb)->frags[i]);
+			vaddr = kmap_skb_frag(&skb_shinfo(skb)->frags[i]);//取得分散数据块所在的页面地址
 			memcpy(to,
 			       vaddr + skb_shinfo(skb)->frags[i].page_offset+
-			       offset - start, copy);
-			kunmap_skb_frag(vaddr);
+			       offset - start, copy);//按长度复制分散数据块的内容,存放到分段数据包的数据块中
+			kunmap_skb_frag(vaddr);//冲刷分散数据块所在的页面
 
-			if ((len -= copy) == 0)
+			if ((len -= copy) == 0)//如果复制完成就返回
 				return 0;
-			offset += copy;
-			to     += copy;
+			offset += copy;//调整复制位置
+			to     += copy;//调整存放位置
 		}
-		start = end;
+		start = end;//记录当前的复制终点
 	}
-
-	if (skb_shinfo(skb)->frag_list) {
+	//到这里说明还没有全部复制完成,需要复制原有分段数据包的数据块,这些分段数据包是之前建立的,不要与新建的分段数据包混淆
+	if (skb_shinfo(skb)->frag_list) {//如果有分段数据包存在
 		struct sk_buff *list = skb_shinfo(skb)->frag_list;
 
-		for (; list; list = list->next) {
+		for (; list; list = list->next) {//依次取得每一个分段数据包
 			int end;
 
 			BUG_TRAP(start <= offset + len);
 
-			end = start + list->len;
+			end = start + list->len;//计算复制终点
 			if ((copy = end - offset) > 0) {
-				if (copy > len)
-					copy = len;
+				if (copy > len)//如果超过指定长度
+					copy = len;//以指定长度为复制长度
 				if (skb_copy_bits(list, offset - start,
-						  to, copy))
+						  to, copy))//递归调用,按长度复制原来分段数据包的数据块内容
 					goto fault;
-				if ((len -= copy) == 0)
+				if ((len -= copy) == 0)//复制完成,返回
 					return 0;
-				offset += copy;
-				to     += copy;
+				offset += copy;//调整复制位置
+				to     += copy;//调整存放位置
 			}
-			start = end;
+			start = end;//记录当前的复制终点
 		}
 	}
-	if (!len)
+	if (!len)//复制长度变为0,表示复制成功
 		return 0;
 
 fault:

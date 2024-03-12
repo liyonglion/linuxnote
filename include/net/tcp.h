@@ -512,7 +512,12 @@ static inline void tcp_fast_path_on(struct tcp_sock *tp)
 static inline void tcp_fast_path_check(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
-
+  /*
+  条件1：乱序队列为空
+  条件2：接收窗口还有剩余空间
+  条件3：接收内存没有受限
+  条件4：没有紧急数据需要传输
+  */
 	if (skb_queue_empty(&tp->out_of_order_queue) &&
 	    tp->rcv_wnd &&
 	    atomic_read(&sk->sk_rmem_alloc) < sk->sk_rcvbuf &&

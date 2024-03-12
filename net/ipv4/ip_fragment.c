@@ -303,57 +303,57 @@ static int ip_frag_queue(struct ipq *qp, struct sk_buff *skb)
 	int ihl, end;
 	int err = -ENOENT;
 
-	if (qp->q.last_in & INET_FRAG_COMPLETE)
+	if (qp->q.last_in & INET_FRAG_COMPLETE)//如果分段队列已经接收完成就返回
 		goto err;
 
-	if (!(IPCB(skb)->flags & IPSKB_FRAG_COMPLETE) &&
-	    unlikely(ip_frag_too_far(qp)) &&
-	    unlikely(err = ip_frag_reinit(qp))) {
-		ipq_kill(qp);
+	if (!(IPCB(skb)->flags & IPSKB_FRAG_COMPLETE) &&//如果数据包没有分段标志
+	    unlikely(ip_frag_too_far(qp)) &&//检查分段队列是否间隔过大
+	    unlikely(err = ip_frag_reinit(qp))) {//重新调整分段队列是否出错
+		ipq_kill(qp);//清除分段队列返回
 		goto err;
 	}
 
-	offset = ntohs(ip_hdr(skb)->frag_off);
-	flags = offset & ~IP_OFFSET;
-	offset &= IP_OFFSET;
-	offset <<= 3;		/* offset is in 8-byte chunks */
-	ihl = ip_hdrlen(skb);
+	offset = ntohs(ip_hdr(skb)->frag_off);//取得分段数据块的偏移位置
+	flags = offset & ~IP_OFFSET;//取得分段标志
+	offset &= IP_OFFSET;//对齐边界
+	offset <<= 3;		/* offset is in 8-byte chunks 按8字节边界对齐*/
+	ihl = ip_hdrlen(skb);//获取分段数据块的 IP头部长度
 
 	/* Determine the position of this fragment. */
-	end = offset + skb->len - ihl;
+	end = offset + skb->len - ihl;//确定分段数据块的结束地址
 	err = -EINVAL;
 
 	/* Is this the final fragment? */
-	if ((flags & IP_MF) == 0) {
+	if ((flags & IP_MF) == 0) {//如果是最后一个分段数据块
 		/* If we already have some bits beyond end
 		 * or have different end, the segment is corrrupted.
 		 */
-		if (end < qp->q.len ||
+		if (end < qp->q.len ||//如果结束位置小于前一个的结束位置，则出错返回
 		    ((qp->q.last_in & INET_FRAG_LAST_IN) && end != qp->q.len))
 			goto err;
-		qp->q.last_in |= INET_FRAG_LAST_IN;
-		qp->q.len = end;
+		qp->q.last_in |= INET_FRAG_LAST_IN;//设置最后一个数据包标志
+		qp->q.len = end;//记录数据块的结束地址
 	} else {
-		if (end&7) {
-			end &= ~7;
-			if (skb->ip_summed != CHECKSUM_UNNECESSARY)
-				skb->ip_summed = CHECKSUM_NONE;
+		if (end&7) {//如果分段数据块结束地址没有按8字节对齐
+			end &= ~7;//按8字节对齐
+			if (skb->ip_summed != CHECKSUM_UNNECESSARY)//检查检验和标志
+				skb->ip_summed = CHECKSUM_NONE;//设置无效检验和标志
 		}
-		if (end > qp->q.len) {
+		if (end > qp->q.len) {//结束地址大于前一个的分段数据块的结束地址
 			/* Some bits beyond end -> corruption. */
-			if (qp->q.last_in & INET_FRAG_LAST_IN)
+			if (qp->q.last_in & INET_FRAG_LAST_IN)//如果队列设置了最后分段数据包标志,表示前一个是最后一个数据包，出错返回
 				goto err;
-			qp->q.len = end;
+			qp->q.len = end;//记录当前分段数据块的结束位置
 		}
 	}
-	if (end == offset)
+	if (end == offset)//如果分段数据块结束位置等于起始位置，出错返回
 		goto err;
 
 	err = -ENOMEM;
-	if (pskb_pull(skb, ihl) == NULL)
+	if (pskb_pull(skb, ihl) == NULL)//检查数据块IP头部长度,调整数据块起始地址跳过IP头部,调整数据块的总长度
 		goto err;
 
-	err = pskb_trim_rcsum(skb, end - offset);
+	err = pskb_trim_rcsum(skb, end - offset);//检查数据块的总长度,调整为正确的长度值
 	if (err)
 		goto err;
 
@@ -361,98 +361,100 @@ static int ip_frag_queue(struct ipq *qp, struct sk_buff *skb)
 	 * in the chain of fragments so far.  We must know where to put
 	 * this fragment, right?
 	 */
-	prev = NULL;
+	//开始确定插人位置,prev是插人位置的前一个数据包,next是插入位置的后一个数据包
+	prev = NULL;//用于记录插人位置前面的分段数据包
+	//依次检查分段队列的每一个数据包,确定插人位置
 	for (next = qp->q.fragments; next != NULL; next = next->next) {
-		if (FRAG_CB(next)->offset >= offset)
-			break;	/* bingo! */
-		prev = next;
+		if (FRAG_CB(next)->offset >= offset)//对比当前分段数据块的偏移位置
+			break;	/* bingo! 如果大于就找到了它后面的分段数据包*/
+		prev = next;//否则就是它前面的分段数据包
 	}
 
 	/* We found where to put this one.  Check for overlap with
 	 * preceding fragment, and, if needed, align things so that
 	 * any overlaps are eliminated.
 	 */
-	if (prev) {
-		int i = (FRAG_CB(prev)->offset + prev->len) - offset;
+	if (prev) {//如果找到了前面的分段数据包，就要检查是否与当前数据包重叠
+		int i = (FRAG_CB(prev)->offset + prev->len) - offset;//计算重叠字节数
 
-		if (i > 0) {
-			offset += i;
+		if (i > 0) {//如果重叠
+			offset += i;//调整当前分段数据块偏移值，跳过重叠部分
 			err = -EINVAL;
-			if (end <= offset)
+			if (end <= offset)//如果分段数据块结束位置小于开始位置，出错返回
 				goto err;
 			err = -ENOMEM;
-			if (!pskb_pull(skb, i))
+			if (!pskb_pull(skb, i))//调整当前分段数据块起始地址和长度，消除重叠
 				goto err;
 			if (skb->ip_summed != CHECKSUM_UNNECESSARY)
-				skb->ip_summed = CHECKSUM_NONE;
+				skb->ip_summed = CHECKSUM_NONE;//设置无效检验和标志
 		}
 	}
 
 	err = -ENOMEM;
-
+	//如果找到了后边的分段数据包,并且重叠也要调整消除重叠
 	while (next && FRAG_CB(next)->offset < end) {
-		int i = end - FRAG_CB(next)->offset; /* overlap is 'i' bytes */
+		int i = end - FRAG_CB(next)->offset; /* overlap is 'i' bytes 计算重叠字节数 */
 
-		if (i < next->len) {
+		if (i < next->len) {//没有全部重叠
 			/* Eat head of the next overlapped fragment
 			 * and leave the loop. The next ones cannot overlap.
 			 */
-			if (!pskb_pull(next, i))
+			if (!pskb_pull(next, i))//调整后面数据块的起始地址和长度,调整消除重叠
 				goto err;
-			FRAG_CB(next)->offset += i;
-			qp->q.meat -= i;
+			FRAG_CB(next)->offset += i;//调整后面数据块的偏移位置
+			qp->q.meat -= i;//记录差距值
 			if (next->ip_summed != CHECKSUM_UNNECESSARY)
-				next->ip_summed = CHECKSUM_NONE;
+				next->ip_summed = CHECKSUM_NONE;//设置无效检验和标志
 			break;
-		} else {
-			struct sk_buff *free_it = next;
+		} else {//全部重叠就释放后面的分段数据包
+			struct sk_buff *free_it = next;//记录要释放的分段数据包
 
 			/* Old fragment is completely overridden with
 			 * new one drop it.
 			 */
-			next = next->next;
+			next = next->next;//指向下一个分段数据包
 
-			if (prev)
-				prev->next = next;
+			if (prev)//如果前面的分段数据包存在
+				prev->next = next;//使它与下一个分段数据包挂钩,与释放的数据包脱离关系
 			else
-				qp->q.fragments = next;
+				qp->q.fragments = next;//前面没有数据包就将下一个数据包靠前
 
-			qp->q.meat -= free_it->len;
-			frag_kfree_skb(qp->q.net, free_it, NULL);
+			qp->q.meat -= free_it->len;//记录差距值
+			frag_kfree_skb(qp->q.net, free_it, NULL);//释放数据包
 		}
 	}
 
-	FRAG_CB(skb)->offset = offset;
+	FRAG_CB(skb)->offset = offset;//记录数据块的偏移位置
 
 	/* Insert this fragment in the chain of fragments. */
-	skb->next = next;
-	if (prev)
-		prev->next = skb;
+	skb->next = next;//指向插人位置后面的数据包
+	if (prev)//如果插人位置前面有数据包
+		prev->next = skb;//与前面的数据包挂钩
 	else
-		qp->q.fragments = skb;
+		qp->q.fragments = skb;//前面没有分段数据包就放在队列前面
 
-	dev = skb->dev;
+	dev = skb->dev;//取得数据包的网络设备结构
 	if (dev) {
-		qp->iif = dev->ifindex;
-		skb->dev = NULL;
+		qp->iif = dev->ifindex;//分段队列记录网络设备的ID
+		skb->dev = NULL;//清空数据包的设备指针
 	}
-	qp->q.stamp = skb->tstamp;
-	qp->q.meat += skb->len;
-	atomic_add(skb->truesize, &qp->q.net->mem);
-	if (offset == 0)
-		qp->q.last_in |= INET_FRAG_FIRST_IN;
+	qp->q.stamp = skb->tstamp;//记录时间戳
+	qp->q.meat += skb->len;//缩小差距值
+	atomic_add(skb->truesize, &qp->q.net->mem);//累计分段数据包的总内存数
+	if (offset == 0)//如果是第一个分段数据块
+		qp->q.last_in |= INET_FRAG_FIRST_IN;//设置接收了第一个分段数据包标志
 
 	if (qp->q.last_in == (INET_FRAG_FIRST_IN | INET_FRAG_LAST_IN) &&
-	    qp->q.meat == qp->q.len)
-		return ip_frag_reasm(qp, prev, dev);
+	    qp->q.meat == qp->q.len)//如果接收了全部的分段数据包
+		return ip_frag_reasm(qp, prev, dev);//重组数据包
 
 	write_lock(&ip4_frags.lock);
-	list_move_tail(&qp->q.lru_list, &qp->q.net->lru_list);
+	list_move_tail(&qp->q.lru_list, &qp->q.net->lru_list);//将分段队列结构链人老化队列的尾部
 	write_unlock(&ip4_frags.lock);
 	return -EINPROGRESS;
 
 err:
-	kfree_skb(skb);
+	kfree_skb(skb);//释放数据包
 	return err;
 }
 
@@ -463,92 +465,102 @@ static int ip_frag_reasm(struct ipq *qp, struct sk_buff *prev,
 			 struct net_device *dev)
 {
 	struct iphdr *iph;
-	struct sk_buff *fp, *head = qp->q.fragments;
+	struct sk_buff *fp, *head = qp->q.fragments;//指向分段队列的第一个数据包
 	int len;
 	int ihlen;
 	int err;
 
-	ipq_kill(qp);
+	ipq_kill(qp);//将分段队列结构从它所在的队列中脱链,摘除定时器
 
 	/* Make the one we just received the head. */
-	if (prev) {
-		head = prev->next;
-		fp = skb_clone(head, GFP_ATOMIC);
-		if (!fp)
+	/*检查是否还有足够的内存可用,并确保第一个数据包的正确性*/
+	if (prev) {//参数prev指向前面的数据包(处于当前接收数据包前面)
+		head = prev->next;//指向当前接收的数据包(乱序到达,可能不是最后一个)
+		fp = skb_clone(head, GFP_ATOMIC);//克隆(复制)当前接收的数据包
+		if (!fp)//复制失败退出
 			goto out_nomem;
 
-		fp->next = head->next;
-		prev->next = fp;
+		fp->next = head->next;//记录原来的队列关系，与后面的数据包挂钩
+		prev->next = fp;//与前面的数据包挂钩
 
-		skb_morph(head, qp->q.fragments);
-		head->next = qp->q.fragments->next;
-
-		kfree_skb(qp->q.fragments);
-		qp->q.fragments = head;
+		skb_morph(head, qp->q.fragments);//将 head 变异为队列的第一个数据包,就是将当前接收的数据包结构作为第一个数据包,清空原来内容、复制第一个数据包的内容
+		head->next = qp->q.fragments->next;//指向队列中的第二个数据包
+		//将 head 设置为队列第一个数据包结构
+		kfree_skb(qp->q.fragments);//释放原来的第一个数据包结构
+		qp->q.fragments = head;//head 成为第一个数据包
 	}
 
-	BUG_TRAP(head != NULL);
-	BUG_TRAP(FRAG_CB(head)->offset == 0);
+	BUG_TRAP(head != NULL);//检查第一个数据包是否为空
+	BUG_TRAP(FRAG_CB(head)->offset == 0);//检查第一个数据块偏移是否正确
 
 	/* Allocate a new buffer for the datagram. */
-	ihlen = ip_hdrlen(head);
-	len = ihlen + qp->q.len;
+	ihlen = ip_hdrlen(head);//获取第一个数据包的 IP头部长度
+	len = ihlen + qp->q.len;//计算主数据块的长度
 
 	err = -E2BIG;
-	if (len > 65535)
+	if (len > 65535)//如果主数据块长度超过最大极限64K,返回
 		goto out_oversize;
 
 	/* Head of list must not be cloned. */
+	/*函数中的if语句很容易误解,可能会对它的必要性产生怀疑,其实这段语句有两方面的作用:验证内存空间和获取正确的第一个数据包。
+	因为重组过程需要申请新的数据包空间,提前验证内存空间可避免后面的多余操作,第一个数据包将用作主数据包,它的正确性是重组的关键。*/
 	if (skb_cloned(head) && pskb_expand_head(head, 0, 0, GFP_ATOMIC))
-		goto out_nomem;
+		goto out_nomem;//如果第一个数据包是克隆的数据包,就要重新分配缓冲块和共享结构空间然后复制数据块和共享结构内容,记录下缓冲块、数据块的起始和结束地址
 
 	/* If the first fragment is fragmented itself, we split
 	 * it to two chunks: the first with data and paged part
 	 * and the second, holding only fragments. */
-	if (skb_shinfo(head)->frag_list) {
-		struct sk_buff *clone;
+	/*
+	这里要考虑第一个数据包是否带有分段数据包,如果它带有分段数据包,则先转移到IP分段队列中来;转移操作并不能直接通过数据包的指针链人、链出实现,
+	而是需要建立一个转移数据包。因此代码中先分配一个转移数据包,使它接手第一个数据包的分段队列,成为分段队列的新主人。这个转移数据包自身并不带有基本数据块,
+	因此不需要申请缓冲块,只是分配了数据包空间和共享数据结构空间,这个分配过程肯定可以成功,这是前面克降验证的原因。转移数据包只需要接手第一个数据包的分段数据包队列,
+	因此它的数据块总长度等于分段数据块的总长度。第一个数据包因为交出了分段数据包队列,这时只剩下基本数据块和分散数据块,由此调整它的数据块长度。
+	接下来将IP分段队列的剩余分段数据包全部链人到第一个数据包的分段队列,它们成为了第一个数据包的分段数据包,使第一个数据包真正成为了主数据包。
+	*/
+	if (skb_shinfo(head)->frag_list) {//如果第一个数据包有分段数据包,就要将它的分段数据包转移到IP分段队列中
+		struct sk_buff *clone;//克隆数据包指针
 		int i, plen = 0;
 
-		if ((clone = alloc_skb(0, GFP_ATOMIC)) == NULL)
+		if ((clone = alloc_skb(0, GFP_ATOMIC)) == NULL)//分配克隆数据包、缓冲块和共享结构空间,注意缓冲块的长度为0,它只是起到转移点的作用
 			goto out_nomem;
-		clone->next = head->next;
-		head->next = clone;
-		skb_shinfo(clone)->frag_list = skb_shinfo(head)->frag_list;
-		skb_shinfo(head)->frag_list = NULL;
-		for (i=0; i<skb_shinfo(head)->nr_frags; i++)
-			plen += skb_shinfo(head)->frags[i].size;
-		clone->len = clone->data_len = head->data_len - plen;
-		head->data_len -= clone->len;
-		head->len -= clone->len;
-		clone->csum = 0;
-		clone->ip_summed = head->ip_summed;
-		atomic_add(clone->truesize, &qp->q.net->mem);
+		clone->next = head->next;//将它链人到IP分段队列中,与第二个数据包建立关系
+		head->next = clone;//与第一个数据包挂钩,成为第二个数据包
+		skb_shinfo(clone)->frag_list = skb_shinfo(head)->frag_list;//继承第一个数据包的分段队列
+		skb_shinfo(head)->frag_list = NULL;//第一个数据包与它的分段队列脱离关系
+		for (i=0; i<skb_shinfo(head)->nr_frags; i++)//循环取得每一个分散数据块的长度
+			plen += skb_shinfo(head)->frags[i].size;//累计分散数据块的总长度
+		clone->len = clone->data_len = head->data_len - plen;//计算分段数据包的数据块总长度,记录到克隆数据包的数据块总长度中
+		head->data_len -= clone->len;//设置第一个数据包的分散数据块总长度
+		head->len -= clone->len;//调整第一个数据包的数据块总长度(只包括基本数据块和分散数据块的长度)
+		clone->csum = 0;//初始化检验和
+		clone->ip_summed = head->ip_summed;//继承第一个数据包的检验和标志
+		atomic_add(clone->truesize, &qp->q.net->mem);//累加数据包占用内存计数
 	}
 
-	skb_shinfo(head)->frag_list = head->next;
-	skb_push(head, head->data - skb_network_header(head));
-	atomic_sub(head->truesize, &qp->q.net->mem);
-
-	for (fp=head->next; fp; fp = fp->next) {
-		head->data_len += fp->len;
-		head->len += fp->len;
-		if (head->ip_summed != fp->ip_summed)
-			head->ip_summed = CHECKSUM_NONE;
-		else if (head->ip_summed == CHECKSUM_COMPLETE)
-			head->csum = csum_add(head->csum, fp->csum);
-		head->truesize += fp->truesize;
-		atomic_sub(fp->truesize, &qp->q.net->mem);
+	skb_shinfo(head)->frag_list = head->next;//把其他数据包当做第一个数据包的分段数剧包
+	skb_push(head, head->data - skb_network_header(head));//调整第一个数据包的数据块起始地址，使它包含IP头部
+	atomic_sub(head->truesize, &qp->q.net->mem);//递减数据包占用内存数
+	//此后,head作为主数据包结构使用
+	for (fp=head->next; fp; fp = fp->next) {//依次取得分段队列中的每一个数据包
+		head->data_len += fp->len;//累加每一个数据块的长度
+		head->len += fp->len;//主数据块的长度累加每一个数据块的长度
+		if (head->ip_summed != fp->ip_summed)//对比检验和标志
+			head->ip_summed = CHECKSUM_NONE;//标志不同就设置为无检验和标志
+		else if (head->ip_summed == CHECKSUM_COMPLETE)//如果检验和完整
+			head->csum = csum_add(head->csum, fp->csum);//重新调整检验和
+		head->truesize += fp->truesize;//主数据包的实际长度累加每一个数据包的实际长度
+		atomic_sub(fp->truesize, &qp->q.net->mem);//递减数据包占用内存数
 	}
 
-	head->next = NULL;
-	head->dev = dev;
-	head->tstamp = qp->q.stamp;
+	head->next = NULL;//断开分段队列的联系
+	head->dev = dev;//记录网络设备结构
+	head->tstamp = qp->q.stamp;//记录时间戳
 
-	iph = ip_hdr(head);
-	iph->frag_off = 0;
-	iph->tot_len = htons(len);
-	IP_INC_STATS_BH(IPSTATS_MIB_REASMOKS);
-	qp->q.fragments = NULL;
+	iph = ip_hdr(head);//取得主数据包的IP头部结构
+	iph->frag_off = 0;//清除分段标志,偏移位置为0
+	iph->tot_len = htons(len);//记录主数据块的长度
+	IP_INC_STATS_BH(IPSTATS_MIB_REASMOKS);//递增重组成功计数
+	qp->q.fragments = NULL;//置空分段队列的数据包指针
 	return 0;
 
 out_nomem:
@@ -562,7 +574,7 @@ out_oversize:
 			"Oversized IP packet from " NIPQUAD_FMT ".\n",
 			NIPQUAD(qp->saddr));
 out_fail:
-	IP_INC_STATS_BH(IPSTATS_MIB_REASMFAILS);
+	IP_INC_STATS_BH(IPSTATS_MIB_REASMFAILS);//递增失败计数器
 	return err;
 }
 
@@ -572,28 +584,29 @@ int ip_defrag(struct sk_buff *skb, u32 user)
 	struct ipq *qp;
 	struct net *net;
 
-	IP_INC_STATS_BH(IPSTATS_MIB_REASMREQDS);
+	IP_INC_STATS_BH(IPSTATS_MIB_REASMREQDS);//递增计数
 
-	net = skb->dev ? dev_net(skb->dev) : dev_net(skb->dst->dev);
+	net = skb->dev ? dev_net(skb->dev) : dev_net(skb->dst->dev);//获取网络空间
 	/* Start by cleaning up the memory. */
+	//查看分段数据包占用空间是否达到上限
 	if (atomic_read(&net->ipv4.frags.mem) > net->ipv4.frags.high_thresh)
-		ip_evictor(net);
+		ip_evictor(net);//清除网络空间内的分段队列
 
 	/* Lookup (or create) queue header */
-	if ((qp = ip_find(net, ip_hdr(skb), user)) != NULL) {
+	if ((qp = ip_find(net, ip_hdr(skb), user)) != NULL) {//查找或者创建IP分段队列
 		int ret;
 
-		spin_lock(&qp->q.lock);
+		spin_lock(&qp->q.lock);//自旋锁
 
-		ret = ip_frag_queue(qp, skb);
+		ret = ip_frag_queue(qp, skb);//分段数据包人队，重组数据包
 
 		spin_unlock(&qp->q.lock);
-		ipq_put(qp);
+		ipq_put(qp);//递减IP分段队列的使用计数
 		return ret;
 	}
 
-	IP_INC_STATS_BH(IPSTATS_MIB_REASMFAILS);
-	kfree_skb(skb);
+	IP_INC_STATS_BH(IPSTATS_MIB_REASMFAILS);//递增失败计数
+	kfree_skb(skb);//释放数据包
 	return -ENOMEM;
 }
 

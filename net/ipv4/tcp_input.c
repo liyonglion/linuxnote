@@ -4657,6 +4657,20 @@ out:
  *	the rest is checked inline. Fast processing is turned on in
  *	tcp_data_queue when everything is OK.
  */
+/*
+tcp_rcv_established函数的工作原理是把数据包的处理分为2类：fast path和slow path，其含义显而易见
+。这样分类的目的当然是加快数据包的处理，因为在正常情况下，数据包是按顺序到达的，网络状况也是稳定的，这时可以按照fast path直接把数据包存放到receive queue了。
+而在其他的情况下则需要走slow path流程了。
+从fast path进入slow path的触发条件（进入slow path 后pred_flags清除为0）：
+1. 在tcp_data_queue中接收到乱序数据包
+2. 在tcp_prune_queue中用完缓存并且开始丢弃数据包
+3. 在tcp_urgent_check中遇到紧急指针
+4. 在tcp_select_window中发送的通告窗口下降到0.
+从slow_path进入fast_path的触发条件：
+1 When we have read past an urgent byte in tcp_recvmsg() . Wehave gotten an urgent byte and we remain in the slow path mode until we receive the urgent byte because it is handled in the slow path in tcp_rcv_established().
+2 当在tcp_data_queue中乱序队列由于gap被填充而处理完毕时，运行tcp_fast_path_check。
+3 tcp_ack_update_window()中更新了通告窗口。
+*/
 int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 			struct tcphdr *th, unsigned len)
 {
@@ -4687,9 +4701,9 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 	 *	 space for instance)
 	 *	PSH flag is ignored.
 	 */
-
+	//TCP_HP_BITS的作用就是排除flag中的PSH标志位。只有在头部预测满足并且数据包以正确的顺序（该数据包的第一个序号就是下个要接收的序号）到达时才进入fast path。
 	if ((tcp_flag_word(th) & TCP_HP_BITS) == tp->pred_flags &&
-	    TCP_SKB_CB(skb)->seq == tp->rcv_nxt) {
+	    TCP_SKB_CB(skb)->seq == tp->rcv_nxt) {//判断能否进入fast path
 		int tcp_header_len = tp->tcp_header_len;
 
 		/* Timestamp header prediction: tcp_header_len

@@ -437,32 +437,32 @@ static void ip_copy_metadata(struct sk_buff *to, struct sk_buff *from)
  *	single device frame, and queue such a frame for sending.
  */
 
-int ip_fragment(struct sk_buff *skb, int (*output)(struct sk_buff*))
+int ip_fragment(struct sk_buff *skb, int (*output)(struct sk_buff*))//此处的output=ip_finish_output()函数
 {
-	struct iphdr *iph;
+	struct iphdr *iph;//IP头部指针
 	int raw = 0;
 	int ptr;
-	struct net_device *dev;
+	struct net_device *dev;//设备指针
 	struct sk_buff *skb2;
 	unsigned int mtu, hlen, left, len, ll_rs, pad;
 	int offset;
 	__be16 not_last_frag;
-	struct rtable *rt = skb->rtable;
+	struct rtable *rt = skb->rtable;//缓存路由指针
 	int err = 0;
 
-	dev = rt->u.dst.dev;
+	dev = rt->u.dst.dev;//路由中指定的网络设备结构指针
 
 	/*
 	 *	Point into the IP datagram header.
 	 */
 
-	iph = ip_hdr(skb);
-
+	iph = ip_hdr(skb);//取得IP头部指针
+	//数据包不允许分段并且数据包不允许本地分段
 	if (unlikely((iph->frag_off & htons(IP_DF)) && !skb->local_df)) {
-		IP_INC_STATS(IPSTATS_MIB_FRAGFAILS);
+		IP_INC_STATS(IPSTATS_MIB_FRAGFAILS);//失败计数
 		icmp_send(skb, ICMP_DEST_UNREACH, ICMP_FRAG_NEEDED,
-			  htonl(ip_skb_dst_mtu(skb)));
-		kfree_skb(skb);
+			  htonl(ip_skb_dst_mtu(skb)));//发送无法到达ICMP数据包，原因是数据包过大需要分片，并返回MTU
+		kfree_skb(skb);//释放包
 		return -EMSGSIZE;
 	}
 
@@ -470,9 +470,9 @@ int ip_fragment(struct sk_buff *skb, int (*output)(struct sk_buff*))
 	 *	Setup starting values.
 	 */
 
-	hlen = iph->ihl * 4;
-	mtu = dst_mtu(&rt->u.dst) - hlen;	/* Size of data space */
-	IPCB(skb)->flags |= IPSKB_FRAG_COMPLETE;
+	hlen = iph->ihl * 4;//设置为标准的IP头部长度(包括IP选项在内)
+	mtu = dst_mtu(&rt->u.dst) - hlen;	/* Size of data space 实际可用的MTU头*/
+	IPCB(skb)->flags |= IPSKB_FRAG_COMPLETE;//设置分段标识
 
 	/* When frag_list is given, use it. First, check its validity:
 	 * some transformers could create wrong frag_list or break existing
@@ -481,134 +481,135 @@ int ip_fragment(struct sk_buff *skb, int (*output)(struct sk_buff*))
 	 * LATER: this step can be merged to real generation of fragments,
 	 * we can switch to copy when see the first bad fragment.
 	 */
-	if (skb_shinfo(skb)->frag_list) {
-		struct sk_buff *frag;
-		int first_len = skb_pagelen(skb);
-		int truesizes = 0;
+	//分段前的数据包我们称之为：主数据包；分段后的称之为：分段数据包
+	if (skb_shinfo(skb)->frag_list) {//主数据包已经建立分段数据包队列
+		struct sk_buff *frag;//分段数据包指针
+		int first_len = skb_pagelen(skb);//确定第一个数据块的长度，等于基本数据块与全部分散数据块的长度之和
+		int truesizes = 0;//用来记录分段数据包的总长度
 
-		if (first_len - hlen > mtu ||
-		    ((first_len - hlen) & 7) ||
-		    (iph->frag_off & htons(IP_MF|IP_OFFSET)) ||
-		    skb_cloned(skb))
-			goto slow_path;
-
+		if (first_len - hlen > mtu ||//第一个数据包长度大于MTU
+		    ((first_len - hlen) & 7) ||//长度是否按照8字节对齐(RFC)
+		    (iph->frag_off & htons(IP_MF|IP_OFFSET)) ||//检查IP头部分段标志
+		    skb_cloned(skb))//数据包是克隆的
+			goto slow_path;//跳转到满发送流程
+		//检查分段队列中的每一个分段数据包，计算总长度
 		for (frag = skb_shinfo(skb)->frag_list; frag; frag = frag->next) {
 			/* Correct geometry. */
-			if (frag->len > mtu ||
-			    ((frag->len & 7) && frag->next) ||
-			    skb_headroom(frag) < hlen)
-			    goto slow_path;
+			if (frag->len > mtu ||//检查分片是否大于MTU
+			    ((frag->len & 7) && frag->next) ||//检查长度对齐和下一个分段
+			    skb_headroom(frag) < hlen)//检查足够的IP头部空间
+			    goto slow_path;//慢处理流程
 
 			/* Partially cloned skb? */
-			if (skb_shared(frag))
-				goto slow_path;
+			if (skb_shared(frag))//分段数据包被共享使用
+				goto slow_path;//共享数据包不能被修改，跳转到慢处理发送
 
 			BUG_ON(frag->sk);
-			if (skb->sk) {
-				sock_hold(skb->sk);
-				frag->sk = skb->sk;
-				frag->destructor = sock_wfree;
-				truesizes += frag->truesize;
+			if (skb->sk) {//主数据包记录sock指针
+				sock_hold(skb->sk);//增加使用计数
+				frag->sk = skb->sk;//分段数据包记录sock指针
+				frag->destructor = sock_wfree;//设置分段数据包的释放函数
+				truesizes += frag->truesize;//计数每隔分段数据包长度
 			}
 		}
 
 		/* Everything is OK. Generate! */
-
+		//主数据包作为第一个数据包，设置它的IP头部信息
 		err = 0;
-		offset = 0;
-		frag = skb_shinfo(skb)->frag_list;
-		skb_shinfo(skb)->frag_list = NULL;
-		skb->data_len = first_len - skb_headlen(skb);
-		skb->truesize -= truesizes;
-		skb->len = first_len;
-		iph->tot_len = htons(first_len);
-		iph->frag_off = htons(IP_MF);
-		ip_send_check(iph);
+		offset = 0;//分段数据包的数据块偏移位置
+		frag = skb_shinfo(skb)->frag_list;//获取第一个分段数据包指针
+		skb_shinfo(skb)->frag_list = NULL;//清空主数据包的分段队列指针
+		skb->data_len = first_len - skb_headlen(skb);//记录第一个数据块的长度
+		skb->truesize -= truesizes;//记录第一个数据包的实际长度
+		skb->len = first_len;//第一个数据包的数据块总长度
+		iph->tot_len = htons(first_len);//IP头部记录第一个数据块总长度
+		iph->frag_off = htons(IP_MF);//设置IP头部分段标识
+		ip_send_check(iph);//IP头部校验和
 
-		for (;;) {
+		for (;;) {//循环处理每一个分段数据包
 			/* Prepare header of the next frame,
 			 * before previous one went down. */
-			if (frag) {
-				frag->ip_summed = CHECKSUM_NONE;
-				skb_reset_transport_header(frag);
-				__skb_push(frag, hlen);
-				skb_reset_network_header(frag);
-				memcpy(skb_network_header(frag), iph, hlen);
-				iph = ip_hdr(frag);
-				iph->tot_len = htons(frag->len);
-				ip_copy_metadata(frag, skb);
-				if (offset == 0)
-					ip_options_fragment(frag);
-				offset += skb->len - hlen;
-				iph->frag_off = htons(offset>>3);
-				if (frag->next != NULL)
+			if (frag) {//存在分段数据包
+				frag->ip_summed = CHECKSUM_NONE;//设置校验和标志
+				skb_reset_transport_header(frag);//设置TCP头部指针
+				__skb_push(frag, hlen);//调整数据块指针，指向IP头部位置
+				skb_reset_network_header(frag);//设置IP头部指针
+				memcpy(skb_network_header(frag), iph, hlen);//复制IP头部
+				iph = ip_hdr(frag);//指向分段数据包的IP头部
+				iph->tot_len = htons(frag->len);//记录分段数据包的数据块长度
+				ip_copy_metadata(frag, skb);//复制主数据包的内容
+				if (offset == 0)//第一个分段数据包的数据偏移量位置为0
+					ip_options_fragment(frag);//初始化IP选项
+				offset += skb->len - hlen;//下一个数据包的数据块偏移位置
+				iph->frag_off = htons(offset>>3);//IP头部记录分段数据块偏移位置,右移3位跳过分段标志位,因此长度要按8字节对齐
+				if (frag->next != NULL)//最后一个分段数据包不设置IP_MF标志
 					iph->frag_off |= htons(IP_MF);
 				/* Ready, complete checksum */
-				ip_send_check(iph);
+				ip_send_check(iph);//设置分段数据包IP头部的检验和
 			}
 
-			err = output(skb);
+			err = output(skb);//调用发送函数先发送第一个据包,然后循环发送每一个分段数据包
 
 			if (!err)
-				IP_INC_STATS(IPSTATS_MIB_FRAGCREATES);
-			if (err || !frag)
+				IP_INC_STATS(IPSTATS_MIB_FRAGCREATES);//递增分段计数
+			if (err || !frag)//如果出现错误或者没有分段数据包就跳出
 				break;
 
-			skb = frag;
-			frag = skb->next;
-			skb->next = NULL;
+			skb = frag;//指向要发送的分段数据包
+			frag = skb->next;//指向下一个分段数据包
+			skb->next = NULL;//清空下一个数据包指针
 		}
 
 		if (err == 0) {
-			IP_INC_STATS(IPSTATS_MIB_FRAGOKS);
+			IP_INC_STATS(IPSTATS_MIB_FRAGOKS);//递增成功计数
 			return 0;
 		}
-
-		while (frag) {
+		//发送出现错误
+		while (frag) {//释放所有分段数据包
 			skb = frag->next;
 			kfree_skb(frag);
 			frag = skb;
 		}
-		IP_INC_STATS(IPSTATS_MIB_FRAGFAILS);
-		return err;
+		IP_INC_STATS(IPSTATS_MIB_FRAGFAILS);//递增错误计数
+		return err;//返回错误码
 	}
 
-slow_path:
-	left = skb->len - hlen;		/* Space per frame */
-	ptr = raw + hlen;		/* Where to start from */
+slow_path://慢发送处,参数skb在此仍称为主数据包，便于区别
+	left = skb->len - hlen;		//主数据包的数据块(下称主数据块)剩余长度,它是传输层数据长度和ICP头部长度之和,需要分解到分段数据包的数据块(下称分段数据块）
+	ptr = raw + hlen;		/* Where to start from用于说明复制位置 */
 
 	/* for bridged IP traffic encapsulated inside f.e. a vlan header,
 	 * we need to make room for the encapsulating header
 	 */
-	pad = nf_bridge_pad(skb);
-	ll_rs = LL_RESERVED_SPACE_EXTRA(rt->u.dst.dev, pad);
-	mtu -= pad;
+	pad = nf_bridge_pad(skb);//这里没有启用网桥,返回0
+	ll_rs = LL_RESERVED_SPACE_EXTRA(rt->u.dst.dev, pad);//链路层头部长度
+	mtu -= pad;//计算 MTU
 
 	/*
 	 *	Fragment the datagram.
 	 */
 
-	offset = (ntohs(iph->frag_off) & IP_OFFSET) << 3;
-	not_last_frag = iph->frag_off & htons(IP_MF);
+	offset = (ntohs(iph->frag_off) & IP_OFFSET) << 3;//按要求8字节对齐
+	not_last_frag = iph->frag_off & htons(IP_MF);//不是最后一个分段数据包标志
 
 	/*
 	 *	Keep copying data until we run out.
 	 */
 
-	while (left > 0) {
-		len = left;
+	while (left > 0) {//循环分段
+		len = left;//初始化长度值,先等于主数据块剩余长度
 		/* IF: it doesn't fit, use 'mtu' - the data space left */
-		if (len > mtu)
+		if (len > mtu)//如果长度值大于MIU就以MTU为长度
 			len = mtu;
 		/* IF: we are not sending upto and including the packet end
 		   then align the next start on an eight byte boundary */
-		if (len < left)	{
-			len &= ~7;
+		if (len < left)	{//如果小于主数据块剩余长度，就对齐长度
+			len &= ~7;//按8字节对齐
 		}
 		/*
 		 *	Allocate buffer.
 		 */
-
+		//创建分段数据包空间,分配分段数据包的缓冲块,缓冲块长度值实际为MTU+IP头部长度+链路层头部长度
 		if ((skb2 = alloc_skb(len+hlen+ll_rs, GFP_ATOMIC)) == NULL) {
 			NETDEBUG(KERN_INFO "IP: frag: no memory for new fragment!\n");
 			err = -ENOMEM;
@@ -619,38 +620,38 @@ slow_path:
 		 *	Set up data on packet
 		 */
 
-		ip_copy_metadata(skb2, skb);
-		skb_reserve(skb2, ll_rs);
-		skb_put(skb2, len + hlen);
-		skb_reset_network_header(skb2);
-		skb2->transport_header = skb2->network_header + hlen;
+		ip_copy_metadata(skb2, skb);//复制主数据包的相关内容到分段数据包
+		skb_reserve(skb2, ll_rs);//调整分段数据块,跳过链路层头部
+		skb_put(skb2, len + hlen);//延伸分段数据块,开辟了传输层数据、TCP头部、IP头部空间
+		skb_reset_network_header(skb2);//记录IP头部指针
+		skb2->transport_header = skb2->network_header + hlen;//记录 TCP 头部指针注意此时分段数据块起始地址仍然在IP头部位置
 
 		/*
 		 *	Charge the memory for the fragment to any owner
 		 *	it might possess
 		 */
 
-		if (skb->sk)
-			skb_set_owner_w(skb2, skb->sk);
+		if (skb->sk)//如果主数据包记录了sock指针
+			skb_set_owner_w(skb2, skb->sk);//分段数据包记录sock指针，并设置释放
 
 		/*
 		 *	Copy the packet header into the new buffer.
 		 */
-
+		//复制主数据包的IP头部内容到分段数据包的IP头部中
 		skb_copy_from_linear_data(skb, skb_network_header(skb2), hlen);
 
 		/*
-		 *	Copy a block of the IP datagram.
+		 *	Copy a block of the IP datagram.//复制主数据块的数据到分段数据块中，ptr指明复制位置
 		 */
 		if (skb_copy_bits(skb, ptr, skb_transport_header(skb2), len))
 			BUG();
-		left -= len;
+		left -= len;//调整主数据块的剩余长度
 
 		/*
 		 *	Fill in the new header fields.
 		 */
-		iph = ip_hdr(skb2);
-		iph->frag_off = htons((offset >> 3));
+		iph = ip_hdr(skb2);//指向分段数据块中的IP头部
+		iph->frag_off = htons((offset >> 3));//记录分段数据块的偏移位置，右移3位跳过分段标志位
 
 		/* ANK: dirty, but effective trick. Upgrade options only if
 		 * the segment to be fragmented was THE FIRST (otherwise,
@@ -658,38 +659,38 @@ slow_path:
 		 * on the initial skb, so that all the following fragments
 		 * will inherit fixed options.
 		 */
-		if (offset == 0)
-			ip_options_fragment(skb);
+		if (offset == 0)//如果是第一个分段数据包
+			ip_options_fragment(skb);//重新设置主数据包的IP选项
 
 		/*
 		 *	Added AC : If we are fragmenting a fragment that's not the
 		 *		   last fragment then keep MF on each bit
 		 */
-		if (left > 0 || not_last_frag)
-			iph->frag_off |= htons(IP_MF);
-		ptr += len;
-		offset += len;
+		if (left > 0 || not_last_frag)//如果主数据块还有剩余(表示分段没有完成),或者主数据包不是最后一个分段
+			iph->frag_off |= htons(IP_MF);//设置多个分段标志
+		ptr += len;//调整下一次复制位置
+		offset += len;//调整下一个分段数据块的偏移位置
 
 		/*
 		 *	Put this fragment into the sending queue.
 		 */
-		iph->tot_len = htons(len + hlen);
+		iph->tot_len = htons(len + hlen);//记录分段数据块的长度
 
-		ip_send_check(iph);
+		ip_send_check(iph);//设置设置分段数据包IP头部的检验和
 
-		err = output(skb2);
+		err = output(skb2);//调用发送函数对分段数据包进行发送
 		if (err)
 			goto fail;
 
-		IP_INC_STATS(IPSTATS_MIB_FRAGCREATES);
+		IP_INC_STATS(IPSTATS_MIB_FRAGCREATES);//递增分段计数
 	}
-	kfree_skb(skb);
-	IP_INC_STATS(IPSTATS_MIB_FRAGOKS);
+	kfree_skb(skb);//分段数据包发送完成，释放主数据包
+	IP_INC_STATS(IPSTATS_MIB_FRAGOKS);//递增成功计数
 	return err;
 
 fail:
-	kfree_skb(skb);
-	IP_INC_STATS(IPSTATS_MIB_FRAGFAILS);
+	kfree_skb(skb);//释放主数据包
+	IP_INC_STATS(IPSTATS_MIB_FRAGFAILS);//递增错误计数
 	return err;
 }
 
