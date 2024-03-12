@@ -83,24 +83,24 @@
 #define IPV4_BEET_PHMAXLEN 8
 
 struct iphdr {
-#if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8	ihl:4,
-		version:4;
-#elif defined (__BIG_ENDIAN_BITFIELD)
-	__u8	version:4,
-  		ihl:4;
+#if defined(__LITTLE_ENDIAN_BITFIELD)//小端结尾
+	__u8	ihl:4,//头部长度
+		version:4;//版本
+#elif defined (__BIG_ENDIAN_BITFIELD)//大端结尾
+	__u8	version:4,//版本
+  		ihl:4;//长度
 #else
 #error	"Please fix <asm/byteorder.h>"
 #endif
-	__u8	tos;
-	__be16	tot_len;
-	__be16	id;
-	__be16	frag_off;
-	__u8	ttl;
-	__u8	protocol;
-	__sum16	check;
-	__be32	saddr;
-	__be32	daddr;
+	__u8	tos;//服务类型
+	__be16	tot_len;//数据包总长度
+	__be16	id;//标识
+	__be16	frag_off;//分段标志和分段数据块偏移位置
+	__u8	ttl;//生存时间
+	__u8	protocol;//协议
+	__sum16	check;//头部校验和
+	__be32	saddr;//源地址
+	__be32	daddr;//目标地址
 	/*The options start here. */
 };
 

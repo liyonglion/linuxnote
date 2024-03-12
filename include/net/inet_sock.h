@@ -37,22 +37,22 @@
  * @ts_needtime - Need to record timestamp
  * @ts_needaddr - Need to record addr of outgoing dev
  */
-struct ip_options {
-	__be32		faddr;
-	unsigned char	optlen;
-	unsigned char	srr;
-	unsigned char	rr;
-	unsigned char	ts;
-	unsigned char	is_strictroute:1,
-			srr_is_hit:1,
-			is_changed:1,
-			rr_needaddr:1,
-			ts_needtime:1,
-			ts_needaddr:1;
-	unsigned char	router_alert;
-	unsigned char	cipso;
-	unsigned char	__pad2;
-	unsigned char	__data[0];
+struct ip_options {//IP选项结构
+	__be32		faddr;//转发地址
+	unsigned char	optlen;//选项长度
+	unsigned char	srr;//源路由在头部的位置
+	unsigned char	rr;//记录路由在头部的位置
+	unsigned char	ts;//时间戳在头部的位置
+	unsigned char	is_strictroute:1,//标识强制路由
+			srr_is_hit:1,//表示数据包目的地址在源路由中
+			is_changed:1,//表示IP检验和需要重新计算
+			rr_needaddr:1,//需要记录路由地址
+			ts_needtime:1,//需要时间
+			ts_needaddr:1;//需要输出设备地址
+	unsigned char	router_alert;//路由警报
+	unsigned char	cipso;//商业互联安全协议选项
+	unsigned char	__pad2;//用于数据对齐
+	unsigned char	__data[0];//用于保存IP选项数据指针
 };
 
 #define optlength(opt) (sizeof(struct ip_options) + opt->optlen)
@@ -118,9 +118,9 @@ struct inet_sock {//inet协议族结构。描述ip协议的通用传输控制信
 	__be32			saddr;//源地址。在bind过程中，rcv_saddr = saddr
 	__s16			uc_ttl; //单播TTL
 	__u16			cmsg_flags;
-	struct ip_options	*opt;
+	struct ip_options	*opt;//IP选项
 	__be16			sport;//绑定端口号
-	__u16			id;
+	__u16			id;//ip 头中的流ID，用于DF包的标识
 	__u8			tos;
 	__u8			mc_ttl;//组播TTL
 	__u8			pmtudisc;//是否按照MTU分包

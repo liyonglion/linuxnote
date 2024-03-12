@@ -837,20 +837,20 @@ void tcp_enter_cwr(struct sock *sk, const int set_ssthresh)
 	struct tcp_sock *tp = tcp_sk(sk);
 	const struct inet_connection_sock *icsk = inet_csk(sk);
 
-	tp->prior_ssthresh = 0;
-	tp->bytes_acked = 0;
-	if (icsk->icsk_ca_state < TCP_CA_CWR) {
-		tp->undo_marker = 0;
-		if (set_ssthresh)
-			tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk);
+	tp->prior_ssthresh = 0;//设置慢启动值
+	tp->bytes_acked = 0;//ack计数器
+	if (icsk->icsk_ca_state < TCP_CA_CWR) {//连接结构的拥塞状态在拥塞窗口范围
+		tp->undo_marker = 0;//跟踪重新发送标志
+		if (set_ssthresh)//设置慢启动
+			tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk);//调用函数计算慢启动的阈值。tcp_reno_ssthresh()
 		tp->snd_cwnd = min(tp->snd_cwnd,
-				   tcp_packets_in_flight(tp) + 1U);
-		tp->snd_cwnd_cnt = 0;
-		tp->high_seq = tp->snd_nxt;
-		tp->snd_cwnd_stamp = tcp_time_stamp;
-		TCP_ECN_queue_cwr(tp);
+				   tcp_packets_in_flight(tp) + 1U);//设置发送窗口
+		tp->snd_cwnd_cnt = 0;//阻塞计数器
+		tp->high_seq = tp->snd_nxt;//记录阻塞时下一个发送序号
+		tp->snd_cwnd_stamp = tcp_time_stamp;//记录发送阻塞事件
+		TCP_ECN_queue_cwr(tp);//设置CWR标志
 
-		tcp_set_ca_state(sk, TCP_CA_CWR);
+		tcp_set_ca_state(sk, TCP_CA_CWR);//设置阻塞状态
 	}
 }
 

@@ -1568,40 +1568,40 @@ static int dev_gso_segment(struct sk_buff *skb)
 
 int dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	if (likely(!skb->next)) {
-		if (!list_empty(&ptype_all))
-			dev_queue_xmit_nit(skb, dev);
+	if (likely(!skb->next)) {//如果只有一个数据
+		if (!list_empty(&ptype_all))//如果数据包类型队列不为空
+			dev_queue_xmit_nit(skb, dev);//调用数据包类型结构的发送函数
 
-		if (netif_needs_gso(dev, skb)) {
-			if (unlikely(dev_gso_segment(skb)))
+		if (netif_needs_gso(dev, skb)) {//如果需要分段发送
+			if (unlikely(dev_gso_segment(skb)))//如果设备无法分段发送，就释放数据包
 				goto out_kfree_skb;
-			if (skb->next)
+			if (skb->next)//如果有分段数据包
 				goto gso;
 		}
 
-		return dev->hard_start_xmit(skb, dev);
+		return dev->hard_start_xmit(skb, dev);//调用网络设备的发送函数
 	}
 
-gso:
+gso://循环发送分段数据包
 	do {
-		struct sk_buff *nskb = skb->next;
+		struct sk_buff *nskb = skb->next;//指向下一个分段数据包
 		int rc;
 
 		skb->next = nskb->next;
 		nskb->next = NULL;
-		rc = dev->hard_start_xmit(nskb, dev);
-		if (unlikely(rc)) {
+		rc = dev->hard_start_xmit(nskb, dev);//发送分段数据包
+		if (unlikely(rc)) {//网络设备暂时无法处理
 			nskb->next = skb->next;
 			skb->next = nskb;
-			return rc;
+			return rc;//返回发送结果
 		}
-		if (unlikely((netif_queue_stopped(dev) ||
+		if (unlikely((netif_queue_stopped(dev) ||//如果设备处于发送忙状态
 			     netif_subqueue_stopped(dev, skb)) &&
 			     skb->next))
-			return NETDEV_TX_BUSY;
+			return NETDEV_TX_BUSY;//返回忙标志
 	} while (skb->next);
 
-	skb->destructor = DEV_GSO_CB(skb)->destructor;
+	skb->destructor = DEV_GSO_CB(skb)->destructor;//析构函数，用于释放数据包
 
 out_kfree_skb:
 	kfree_skb(skb);
@@ -1636,32 +1636,33 @@ out_kfree_skb:
 
 int dev_queue_xmit(struct sk_buff *skb)
 {
-	struct net_device *dev = skb->dev;
+	struct net_device *dev = skb->dev;//取得网络设备结构
 	struct Qdisc *q;
 	int rc = -ENOMEM;
 
 	/* GSO will handle the following emulations directly. */
-	if (netif_needs_gso(dev, skb))
+	if (netif_needs_gso(dev, skb))//是否需要分段发送
 		goto gso;
 
-	if (skb_shinfo(skb)->frag_list &&
-	    !(dev->features & NETIF_F_FRAGLIST) &&
-	    __skb_linearize(skb))
+	if (skb_shinfo(skb)->frag_list &&//如果存在分段数据包队列
+	    !(dev->features & NETIF_F_FRAGLIST) &&//设备不支持分段发送
+	    __skb_linearize(skb))//将分段数据包合并
 		goto out_kfree_skb;
 
 	/* Fragmented skb is linearized if device does not support SG,
 	 * or if at least one of fragments is in highmem and device
 	 * does not support DMA from it.
 	 */
+	//如果存在分散数据块,但是设备不支持分散集中DMA功能,则将分散数据块合并
 	if (skb_shinfo(skb)->nr_frags &&
 	    (!(dev->features & NETIF_F_SG) || illegal_highdma(dev, skb)) &&
-	    __skb_linearize(skb))
+	    __skb_linearize(skb))//将分散数据块合并
 		goto out_kfree_skb;
 
 	/* If packet is not checksummed and device does not support
 	 * checksumming for this protocol, complete checksumming here.
 	 */
-	if (skb->ip_summed == CHECKSUM_PARTIAL) {
+	if (skb->ip_summed == CHECKSUM_PARTIAL) {//如果还没有完成检验和就完成它
 		skb_set_transport_header(skb, skb->csum_start -
 					      skb_headroom(skb));
 		if (!dev_can_checksum(dev, skb) && skb_checksum_help(skb))
@@ -1688,19 +1689,19 @@ gso:
 	 * also serializes access to the device queue.
 	 */
 
-	q = rcu_dereference(dev->qdisc);
+	q = rcu_dereference(dev->qdisc);//取得设备结构中的排队规则
 #ifdef CONFIG_NET_CLS_ACT
 	skb->tc_verd = SET_TC_AT(skb->tc_verd,AT_EGRESS);
 #endif
-	if (q->enqueue) {
+	if (q->enqueue) {//如果指定了人队函数
 		/* Grab device queue */
 		spin_lock(&dev->queue_lock);
 		q = dev->qdisc;
 		if (q->enqueue) {
 			/* reset queue_mapping to zero */
-			skb_set_queue_mapping(skb, 0);
-			rc = q->enqueue(skb, q);
-			qdisc_run(dev);
+			skb_set_queue_mapping(skb, 0);//多队列情况下,设置当前队列号
+			rc = q->enqueue(skb, q);//执行人队函数
+			qdisc_run(dev);//调用排队规则的发送函数
 			spin_unlock(&dev->queue_lock);
 
 			rc = rc == NET_XMIT_BYPASS ? NET_XMIT_SUCCESS : rc;
@@ -1721,23 +1722,23 @@ gso:
 	   Check this and shot the lock. It is not prone from deadlocks.
 	   Either shot noqueue qdisc, it is even simpler 8)
 	 */
-	if (dev->flags & IFF_UP) {
+	if (dev->flags & IFF_UP) {//检查设备启用标志后获取当前CPU的ID(SMP系统)
 		int cpu = smp_processor_id(); /* ok because BHs are off */
 
-		if (dev->xmit_lock_owner != cpu) {
+		if (dev->xmit_lock_owner != cpu) {//检查是否为当前CPU所使用
 
 			HARD_TX_LOCK(dev, cpu);
 
-			if (!netif_queue_stopped(dev) &&
+			if (!netif_queue_stopped(dev) &&//检查设备的发送状态
 			    !netif_subqueue_stopped(dev, skb)) {
 				rc = 0;
-				if (!dev_hard_start_xmit(skb, dev)) {
+				if (!dev_hard_start_xmit(skb, dev)) {//开始发送数据包
 					HARD_TX_UNLOCK(dev);
 					goto out;
 				}
 			}
 			HARD_TX_UNLOCK(dev);
-			if (net_ratelimit())
+			if (net_ratelimit())//打印限速
 				printk(KERN_CRIT "Virtual device %s asks to "
 				       "queue packet!\n", dev->name);
 		} else {

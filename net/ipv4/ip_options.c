@@ -40,31 +40,32 @@
 void ip_options_build(struct sk_buff * skb, struct ip_options * opt,
 			    __be32 daddr, struct rtable *rt, int is_frag)
 {
-	unsigned char *iph = skb_network_header(skb);
-
+	unsigned char *iph = skb_network_header(skb);//指向数据块中的IP头部
+	//复制inetsock中的IP选项结构内容到控制结构中
 	memcpy(&(IPCB(skb)->opt), opt, sizeof(struct ip_options));
+	//复制_data[0]指向的选项数据,紧跟在IP头部后面存放
 	memcpy(iph+sizeof(struct iphdr), opt->__data, opt->optlen);
-	opt = &(IPCB(skb)->opt);
+	opt = &(IPCB(skb)->opt);//指向控制结构的IP选项
 
-	if (opt->srr)
+	if (opt->srr)//如果指定了源路由的位置,就复制目标地址
 		memcpy(iph+opt->srr+iph[opt->srr+1]-4, &daddr, 4);
 
-	if (!is_frag) {
-		if (opt->rr_needaddr)
+	if (!is_frag) {//不分段
+		if (opt->rr_needaddr)//需要记录路由地址，复制路由表中的对应地址
 			ip_rt_get_source(iph+opt->rr+iph[opt->rr+2]-5, rt);
 		if (opt->ts_needaddr)
-			ip_rt_get_source(iph+opt->ts+iph[opt->ts+2]-9, rt);
-		if (opt->ts_needtime) {
+			ip_rt_get_source(iph+opt->ts+iph[opt->ts+2]-9, rt);//需要输出设备地址，复制路由表中的对应地址
+		if (opt->ts_needtime) {//需要时间
 			struct timespec tv;
 			__be32 midtime;
 			getnstimeofday(&tv);
 			midtime = htonl((tv.tv_sec % 86400) * MSEC_PER_SEC + tv.tv_nsec / NSEC_PER_MSEC);
-			memcpy(iph+opt->ts+iph[opt->ts+2]-5, &midtime, 4);
+			memcpy(iph+opt->ts+iph[opt->ts+2]-5, &midtime, 4);//复制时间
 		}
 		return;
 	}
-	if (opt->rr) {
-		memset(iph+opt->rr, IPOPT_NOP, iph[opt->rr+1]);
+	if (opt->rr) {//需要记录路由
+		memset(iph+opt->rr, IPOPT_NOP, iph[opt->rr+1]);//设置记录路由
 		opt->rr = 0;
 		opt->rr_needaddr = 0;
 	}

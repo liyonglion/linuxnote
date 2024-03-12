@@ -468,16 +468,16 @@ static struct sk_buff *__skb_clone(struct sk_buff *n, struct sk_buff *skb)
 {
 #define C(x) n->x = skb->x
 
-	n->next = n->prev = NULL;
-	n->sk = NULL;
-	__copy_skb_header(n, skb);
+	n->next = n->prev = NULL;//初始化队列用的指针
+	n->sk = NULL;//初始化所属sock指针
+	__copy_skb_header(n, skb);//复制头部
 
-	C(len);
-	C(data_len);
-	C(mac_len);
+	C(len);//复制数据块的总长度
+	C(data_len);//复制非线性长度
+	C(mac_len);//复制链路层头部长度
 	n->hdr_len = skb->nohdr ? skb_headroom(skb) : skb->hdr_len;
 	n->cloned = 1;
-	n->nohdr = 0;
+	n->nohdr = 0;//设置没有头部标志
 	n->destructor = NULL;
 	C(iif);
 	C(tail);

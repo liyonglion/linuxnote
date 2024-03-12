@@ -477,21 +477,24 @@ out:
 }
 
 /* This routine computes an IPv4 TCP checksum. */
+/*
+该函数用来计算IPv4的checksum检验和,checksum用来检验数据的完整性和准确性，通常以十六进制表示。如果检验和超过FF,即255,则用补码表示。
+*/
 void tcp_v4_send_check(struct sock *sk, int len, struct sk_buff *skb)
 {
 	struct inet_sock *inet = inet_sk(sk);
 	struct tcphdr *th = tcp_hdr(skb);
 
-	if (skb->ip_summed == CHECKSUM_PARTIAL) {
+	if (skb->ip_summed == CHECKSUM_PARTIAL) {//驱动程序提供了部分校验和
 		th->check = ~tcp_v4_check(len, inet->saddr,
-					  inet->daddr, 0);
-		skb->csum_start = skb_transport_header(skb) - skb->head;
-		skb->csum_offset = offsetof(struct tcphdr, check);
+					  inet->daddr, 0);//取计算结果的反码作为校验和
+		skb->csum_start = skb_transport_header(skb) - skb->head;//校验和的位置
+		skb->csum_offset = offsetof(struct tcphdr, check);//校验和的相对位置
 	} else {
 		th->check = tcp_v4_check(len, inet->saddr, inet->daddr,
 					 csum_partial((char *)th,
 						      th->doff << 2,
-						      skb->csum));
+						      skb->csum));//计算校验和，并记录在头部
 	}
 }
 

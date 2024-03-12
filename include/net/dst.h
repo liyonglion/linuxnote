@@ -248,7 +248,7 @@ static inline void dst_set_expires(struct dst_entry *dst, int timeout)
 /* Output packet to network from transport.  */
 static inline int dst_output(struct sk_buff *skb)
 {
-	return skb->dst->output(skb);
+	return skb->dst->output(skb);//TCP设置的为ip_output函数
 }
 
 /* Input packet from network to transport.  */

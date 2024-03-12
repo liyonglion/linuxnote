@@ -152,8 +152,8 @@ struct skb_shared_info {//用于支持IP数据分片和TCP数据分段。
 	unsigned short	gso_segs;//分段数据包的个数
 	unsigned short  gso_type;//分段数据包的类型
 	__be32          ip6_frag_id;//IPV6使用
-	struct sk_buff	*frag_list;//分段数据包队列
-	skb_frag_t	frags[MAX_SKB_FRAGS];//分散数据块队列（数组）。
+	struct sk_buff	*frag_list;//数据包被成片段，该域是指向存放分片数据链表其实地址的指针。
+	skb_frag_t	frags[MAX_SKB_FRAGS];//分散数据块队列（数组）。一个页表入口数组，每一个入口就是一个TCP的段。
 };
 
 /* We divide dataref into two halves.  The higher 16 bits hold references

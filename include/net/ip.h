@@ -231,14 +231,14 @@ static inline void ip_select_ident(struct iphdr *iph, struct dst_entry *dst, str
 
 static inline void ip_select_ident_more(struct iphdr *iph, struct dst_entry *dst, struct sock *sk, int more)
 {
-	if (iph->frag_off & htons(IP_DF)) {
-		if (sk && inet_sk(sk)->daddr) {
-			iph->id = htons(inet_sk(sk)->id);
-			inet_sk(sk)->id += 1 + more;
+	if (iph->frag_off & htons(IP_DF)) {//禁止分片
+		if (sk && inet_sk(sk)->daddr) {//检查目的地址
+			iph->id = htons(inet_sk(sk)->id);//使用inet_sock的ID
+			inet_sk(sk)->id += 1 + more;//修改ID
 		} else
 			iph->id = 0;
-	} else
-		__ip_select_ident(iph, dst, more);
+	} else//打开分段功能
+		__ip_select_ident(iph, dst, more);//设置头部ID
 }
 
 /*

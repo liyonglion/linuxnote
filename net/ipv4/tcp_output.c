@@ -284,7 +284,8 @@ static inline void TCP_ECN_send_synack(struct tcp_sock *tp, struct sk_buff *skb)
 	if (!(tp->ecn_flags & TCP_ECN_OK))
 		TCP_SKB_CB(skb)->flags &= ~TCPCB_FLAG_ECE;
 }
-
+//这里根据内核的 sysctl_tcp_ecn 判断是否启用ECN 来增加数据包控制信息标志 TCPCBFLAGECE和TCPCB FLAG_CWR,
+//它们用来表明客户端具有ECN功能,这是遵循RFC793标准设置的。
 static inline void TCP_ECN_send_syn(struct sock *sk, struct sk_buff *skb)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -334,12 +335,12 @@ static void tcp_init_nondata_skb(struct sk_buff *skb, u32 seq, u8 flags)
 {
 	skb->csum = 0;
 
-	TCP_SKB_CB(skb)->flags = flags;
-	TCP_SKB_CB(skb)->sacked = 0;
+	TCP_SKB_CB(skb)->flags = flags;//设置标志
+	TCP_SKB_CB(skb)->sacked = 0;//SACK状态标志
 
-	skb_shinfo(skb)->gso_segs = 1;
-	skb_shinfo(skb)->gso_size = 0;
-	skb_shinfo(skb)->gso_type = 0;
+	skb_shinfo(skb)->gso_segs = 1;//分段数据包总数，代表只有一个数据包，SYN数据包没有分段
+	skb_shinfo(skb)->gso_size = 0;//分段数据包长度
+	skb_shinfo(skb)->gso_type = 0;//分段数据包类型
 
 	TCP_SKB_CB(skb)->seq = seq;//保存计算出来的seq
 	if (flags & (TCPCB_FLAG_SYN | TCPCB_FLAG_FIN))
@@ -488,53 +489,53 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 	 * take such a timestamp before we potentially clone/copy.
 	 */
 	if (icsk->icsk_ca_ops->flags & TCP_CONG_RTT_STAMP)
-		__net_timestamp(skb);
+		__net_timestamp(skb);//记录当前时间，为了处理拥塞时使用
 
-	if (likely(clone_it)) {
-		if (unlikely(skb_cloned(skb)))
-			skb = pskb_copy(skb, gfp_mask);
+	if (likely(clone_it)) {//是否使用克隆数据包
+		if (unlikely(skb_cloned(skb)))//克隆数据包是否可用
+			skb = pskb_copy(skb, gfp_mask);//创建一个数据包，并复制内容
 		else
-			skb = skb_clone(skb, gfp_mask);
+			skb = skb_clone(skb, gfp_mask);//使用克隆数据包
 		if (unlikely(!skb))
 			return -ENOBUFS;
 	}
 
-	inet = inet_sk(sk);
-	tp = tcp_sk(sk);
-	tcb = TCP_SKB_CB(skb);
-	tcp_header_size = tp->tcp_header_len;
+	inet = inet_sk(sk);//获取inet_sock指针
+	tp = tcp_sk(sk);//获取tcp_sock指针
+	tcb = TCP_SKB_CB(skb);//获取TCP控制块结构指针
+	tcp_header_size = tp->tcp_header_len;//获取tcp包头部长度
 
 #define SYSCTL_FLAG_TSTAMPS	0x1
 #define SYSCTL_FLAG_WSCALE	0x2
 #define SYSCTL_FLAG_SACK	0x4
 
-	sysctl_flags = 0;
-	if (unlikely(tcb->flags & TCPCB_FLAG_SYN)) {
-		tcp_header_size = sizeof(struct tcphdr) + TCPOLEN_MSS;
-		if (sysctl_tcp_timestamps) {
-			tcp_header_size += TCPOLEN_TSTAMP_ALIGNED;
-			sysctl_flags |= SYSCTL_FLAG_TSTAMPS;
+	sysctl_flags = 0;//控制标志
+	if (unlikely(tcb->flags & TCPCB_FLAG_SYN)) {//是否设置了SYN标志，要计算tcp头部长度
+		tcp_header_size = sizeof(struct tcphdr) + TCPOLEN_MSS;//修改tcp头部长度，增加MSS选项
+		if (sysctl_tcp_timestamps) {//是否支持TCP时间戳
+			tcp_header_size += TCPOLEN_TSTAMP_ALIGNED;//增加记录时间戳长度
+			sysctl_flags |= SYSCTL_FLAG_TSTAMPS;//增加时间戳标志
 		}
-		if (sysctl_tcp_window_scaling) {
-			tcp_header_size += TCPOLEN_WSCALE_ALIGNED;
-			sysctl_flags |= SYSCTL_FLAG_WSCALE;
+		if (sysctl_tcp_window_scaling) {//是否支持窗口缩放
+			tcp_header_size += TCPOLEN_WSCALE_ALIGNED;//增加记录窗口缩放长度
+			sysctl_flags |= SYSCTL_FLAG_WSCALE;//增加窗口缩放标志
 		}
-		if (sysctl_tcp_sack) {
-			sysctl_flags |= SYSCTL_FLAG_SACK;
-			if (!(sysctl_flags & SYSCTL_FLAG_TSTAMPS))
-				tcp_header_size += TCPOLEN_SACKPERM_ALIGNED;
+		if (sysctl_tcp_sack) {//是否支持SACK
+			sysctl_flags |= SYSCTL_FLAG_SACK;//增加SACK标志
+			if (!(sysctl_flags & SYSCTL_FLAG_TSTAMPS))//如果未设置时间戳标志，增加SACK标志
+				tcp_header_size += TCPOLEN_SACKPERM_ALIGNED;//增加SACK长度
 		}
-	} else if (unlikely(tp->rx_opt.eff_sacks)) {
+	} else if (unlikely(tp->rx_opt.eff_sacks)) {//如果没有指定SACK的总长度
 		/* A SACK is 2 pad bytes, a 2 byte header, plus
 		 * 2 32-bit sequence numbers for each SACK block.
 		 */
 		tcp_header_size += (TCPOLEN_SACK_BASE_ALIGNED +
 				    (tp->rx_opt.eff_sacks *
-				     TCPOLEN_SACK_PERBLOCK));
+				     TCPOLEN_SACK_PERBLOCK));//计算并增加SACK总长度
 	}
 
-	if (tcp_packets_in_flight(tp) == 0)
-		tcp_ca_event(sk, CA_EVENT_TX_START);
+	if (tcp_packets_in_flight(tp) == 0)//是否有包处于发送途中
+		tcp_ca_event(sk, CA_EVENT_TX_START);//调用拥塞窗口事件函数
 
 #ifdef CONFIG_TCP_MD5SIG
 	/*
@@ -546,39 +547,41 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 		tcp_header_size += TCPOLEN_MD5SIG_ALIGNED;
 #endif
 
-	skb_push(skb, tcp_header_size);
-	skb_reset_transport_header(skb);
-	skb_set_owner_w(skb, sk);
+	skb_push(skb, tcp_header_size);//调整数据块起始地址，向下延申，开辟TCP头部空间
+	skb_reset_transport_header(skb);//数据包记录当前的TCP头部指针
+	skb_set_owner_w(skb, sk);//建立与sock的关联，设置析构函数
 
 	/* Build TCP header and checksum it. */
-	th = tcp_hdr(skb);
-	th->source		= inet->sport;
-	th->dest		= inet->dport;
-	th->seq			= htonl(tcb->seq);
-	th->ack_seq		= htonl(tp->rcv_nxt);
+	th = tcp_hdr(skb);//指向数据块中的TCP头部
+	th->source		= inet->sport;//记录源端口
+	th->dest		= inet->dport;//记录目标端口
+	th->seq			= htonl(tcb->seq);//记录发送序号
+	th->ack_seq		= htonl(tp->rcv_nxt);//记录ack序号
 	*(((__be16 *)th) + 6)	= htons(((tcp_header_size >> 2) << 12) |
-					tcb->flags);
+					tcb->flags);//记录头部长度和标识
 
-	if (unlikely(tcb->flags & TCPCB_FLAG_SYN)) {
+	if (unlikely(tcb->flags & TCPCB_FLAG_SYN)) {//是否设置syn标志
 		/* RFC1323: The window in SYN & SYN/ACK segments
 		 * is never scaled.
 		 */
-		th->window	= htons(min(tp->rcv_wnd, 65535U));
+		th->window	= htons(min(tp->rcv_wnd, 65535U));//设置窗口大小
 	} else {
-		th->window	= htons(tcp_select_window(sk));
+		th->window	= htons(tcp_select_window(sk));//
 	}
-	th->check		= 0;
-	th->urg_ptr		= 0;
+	th->check		= 0;//设置校验和
+	th->urg_ptr		= 0;//设置紧急指针
 
 	if (unlikely(tp->urg_mode &&
 		     between(tp->snd_up, tcb->seq + 1, tcb->seq + 0xFFFF))) {
 		th->urg_ptr		= htons(tp->snd_up - tcb->seq);
 		th->urg			= 1;
 	}
-
-	if (unlikely(tcb->flags & TCPCB_FLAG_SYN)) {
+	/*
+	调用 tcp_syn_build options()函数以及 tep_build_and_update_options()函数设置 TCP选项,这两个函数都是按照RFC2385协议来设置或者更新选项内容
+	*/
+	if (unlikely(tcb->flags & TCPCB_FLAG_SYN)) {//是否设置了SYN标志
 		tcp_syn_build_options((__be32 *)(th + 1),
-				      tcp_advertise_mss(sk),
+				      tcp_advertise_mss(sk),//使用对外公开的MSS
 				      (sysctl_flags & SYSCTL_FLAG_TSTAMPS),
 				      (sysctl_flags & SYSCTL_FLAG_SACK),
 				      (sysctl_flags & SYSCTL_FLAG_WSCALE),
@@ -589,7 +592,7 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 #ifdef CONFIG_TCP_MD5SIG
 				      md5 ? &md5_hash_location :
 #endif
-				      NULL);
+				      NULL);//初始化SYN选项
 	} else {
 		tcp_build_and_update_options((__be32 *)(th + 1),
 					     tp, tcb->when,
@@ -597,7 +600,7 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 					     md5 ? &md5_hash_location :
 #endif
 					     NULL);
-		TCP_ECN_send(sk, skb, tcp_header_size);
+		TCP_ECN_send(sk, skb, tcp_header_size);//设置CWR拥塞减少标志ece提醒标志
 	}
 
 #ifdef CONFIG_TCP_MD5SIG
@@ -611,25 +614,25 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 					       skb->len);
 	}
 #endif
+	//tcp_v4_init_sock()函数中被挂入了ipv4_specific 结构
+	icsk->icsk_af_ops->send_check(sk, skb->len, skb);//计算并记录检验和。此处为：tcp_v4_send_check()
 
-	icsk->icsk_af_ops->send_check(sk, skb->len, skb);
+	if (likely(tcb->flags & TCPCB_FLAG_ACK))//如果设置了ACK标志
+		tcp_event_ack_sent(sk, tcp_skb_pcount(skb));//调整快速ACK数值
 
-	if (likely(tcb->flags & TCPCB_FLAG_ACK))
-		tcp_event_ack_sent(sk, tcp_skb_pcount(skb));
-
-	if (skb->len != tcp_header_size)
-		tcp_event_data_sent(tp, skb, sk);
-
+	if (skb->len != tcp_header_size)//检测数据块总长度
+		tcp_event_data_sent(tp, skb, sk);//复位阻塞窗口
+	//检查发送序号，递增发送计数
 	if (after(tcb->end_seq, tp->snd_nxt) || tcb->seq == tcb->end_seq)
 		TCP_INC_STATS(TCP_MIB_OUTSEGS);
 
-	err = icsk->icsk_af_ops->queue_xmit(skb, 0);
+	err = icsk->icsk_af_ops->queue_xmit(skb, 0);//调用连接函数表的发送函数，queue_xmit 为ip_queue_xmit()函数
 	if (likely(err <= 0))
 		return err;
 
-	tcp_enter_cwr(sk, 1);
+	tcp_enter_cwr(sk, 1);//检查阻塞状态,设置慢启动和阻塞窗口等内容
 
-	return net_xmit_eval(err);
+	return net_xmit_eval(err);//确定返回值,拥塞返回0
 
 #undef SYSCTL_FLAG_TSTAMPS
 #undef SYSCTL_FLAG_WSCALE

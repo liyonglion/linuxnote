@@ -46,8 +46,8 @@ static inline __u16	inet_getid(struct inet_peer *p, int more)
 	__u16 id;
 
 	spin_lock_bh(&inet_peer_idlock);
-	id = p->ip_id_count;
-	p->ip_id_count += 1 + more;
+	id = p->ip_id_count;//取得对方信息中的对应内容
+	p->ip_id_count += 1 + more;//增加它的值
 	spin_unlock_bh(&inet_peer_idlock);
 	return id;
 }

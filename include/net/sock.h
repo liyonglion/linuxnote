@@ -1130,8 +1130,8 @@ static inline void skb_set_owner_w(struct sk_buff *skb, struct sock *sk)
 static inline void skb_set_owner_r(struct sk_buff *skb, struct sock *sk)
 {
 	skb->sk = sk;
-	skb->destructor = sock_rfree;
-	atomic_add(skb->truesize, &sk->sk_rmem_alloc);
+	skb->destructor = sock_rfree;//设置释放函数
+	atomic_add(skb->truesize, &sk->sk_rmem_alloc);//调整数据包长度
 	sk_mem_charge(sk, skb->truesize);
 }
 

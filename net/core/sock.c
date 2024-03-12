@@ -344,10 +344,10 @@ EXPORT_SYMBOL(sk_receive_skb);
 struct dst_entry *__sk_dst_check(struct sock *sk, u32 cookie)
 {
 	struct dst_entry *dst = sk->sk_dst_cache;
-
-	if (dst && dst->obsolete && dst->ops->check(dst, cookie) == NULL) {
-		sk->sk_dst_cache = NULL;
-		dst_release(dst);
+	//如果路由项存在但是不可用就调用路由项的检查函数
+	if (dst && dst->obsolete && dst->ops->check(dst, cookie) == NULL) {//check()设置为ipv4_dst_check()函数。这个函数目前只是一个空函数,只是为将来升级路由项的检查做好了准备,此时返回值为空,于是清空sock的路由项指针,递减路由项结构的计数器
+		sk->sk_dst_cache = NULL;//清空缓存指针
+		dst_release(dst);//递减路由项结构计数器
 		return NULL;
 	}
 

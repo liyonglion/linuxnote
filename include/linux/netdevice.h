@@ -214,10 +214,10 @@ struct dev_addr_list
 #define dmi_addrlen	da_addrlen
 #define dmi_users	da_users
 #define dmi_gusers	da_gusers
-
+//hardware header cache缩写
 struct hh_cache
-{
-	struct hh_cache *hh_next;	/* Next entry			     */
+{//链路层头部缓存结构
+	struct hh_cache *hh_next;	/* Next entry		*指向队列中的下一个链路层头部	     */
 	atomic_t	hh_refcnt;	/* number of users                   */
 /*
  * We want hh_output, hh_len, hh_lock and hh_data be a in a separate
@@ -230,8 +230,8 @@ struct hh_cache
                                          *  NOTE:  For VLANs, this will be the
                                          *  encapuslated type. --BLG
                                          */
-	u16		hh_len;		/* length of header */
-	int		(*hh_output)(struct sk_buff *skb);
+	u16		hh_len;		/* length of header 头部缓存的长度,用字节表示*/
+	int		(*hh_output)(struct sk_buff *skb);//发送数据包函数指针
 	seqlock_t	hh_lock;
 
 	/* cached hardware header; allow for machine alignment needs.        */
@@ -240,6 +240,7 @@ struct hh_cache
 	(HH_DATA_MOD - (((__len - 1) & (HH_DATA_MOD - 1)) + 1))
 #define HH_DATA_ALIGN(__len) \
 	(((__len)+(HH_DATA_MOD-1))&~(HH_DATA_MOD - 1))
+	//用来保存链路层头部结构,如以太网卡头部
 	unsigned long	hh_data[HH_DATA_ALIGN(LL_MAX_HEADER) / sizeof(long)];//二层协议头
 };
 
@@ -652,7 +653,7 @@ struct net_device
 	int			xmit_lock_owner;
 	void			*priv;	/* pointer to private data	*/
 	int			(*hard_start_xmit) (struct sk_buff *skb,
-						    struct net_device *dev);
+						    struct net_device *dev);//网卡发送函数
 	/* These may be needed for future network-power-down code. */
 	unsigned long		trans_start;	/* Time (in jiffies) of last Tx	*/
 
@@ -910,10 +911,11 @@ static inline int dev_hard_header(struct sk_buff *skb, struct net_device *dev,
 				  const void *daddr, const void *saddr,
 				  unsigned len)
 {
+	//检查网络设备是否安装了链路层函数表,并且指定了create()函数
 	if (!dev->header_ops || !dev->header_ops->create)
 		return 0;
-
-	return dev->header_ops->create(skb, dev, type, daddr, saddr, len);
+	//调用链路层函数表的 create()函数
+	return dev->header_ops->create(skb, dev, type, daddr, saddr, len);//调用eth_header()
 }
 
 static inline int dev_parse_header(const struct sk_buff *skb,
@@ -1526,9 +1528,9 @@ static inline int skb_gso_ok(struct sk_buff *skb, int features)
 
 static inline int netif_needs_gso(struct net_device *dev, struct sk_buff *skb)
 {
-	return skb_is_gso(skb) &&
-	       (!skb_gso_ok(skb, dev->features) ||
-		unlikely(skb->ip_summed != CHECKSUM_PARTIAL));
+	return skb_is_gso(skb) &&//指定了分段长度
+	       (!skb_gso_ok(skb, dev->features) ||//设备不支持数据包的分段类型
+		unlikely(skb->ip_summed != CHECKSUM_PARTIAL));//驱动程序没有提供检验和
 }
 
 static inline void netif_set_gso_max_size(struct net_device *dev,

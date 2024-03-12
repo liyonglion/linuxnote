@@ -599,7 +599,7 @@ struct tcp_skb_cb {
  */
 static inline int tcp_skb_pcount(const struct sk_buff *skb)
 {
-	return skb_shinfo(skb)->gso_segs;
+	return skb_shinfo(skb)->gso_segs;//分段数据包总数
 }
 
 /* This is valid iff tcp_skb_pcount() > 1. */
@@ -704,9 +704,9 @@ static inline void tcp_set_ca_state(struct sock *sk, const u8 ca_state)
 
 static inline void tcp_ca_event(struct sock *sk, const enum tcp_ca_event event)
 {
-	const struct inet_connection_sock *icsk = inet_csk(sk);
+	const struct inet_connection_sock *icsk = inet_csk(sk);//获取连接结构
 
-	if (icsk->icsk_ca_ops->cwnd_event)
+	if (icsk->icsk_ca_ops->cwnd_event)//在tcp_v4_init_sock函数中，icsk->icsk_ca_ops=&tcp_init_congestion_ops;TCP没有设置拥塞事件，所以直接返回
 		icsk->icsk_ca_ops->cwnd_event(sk, event);
 }
 

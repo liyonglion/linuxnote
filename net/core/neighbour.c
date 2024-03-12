@@ -1218,10 +1218,10 @@ static void neigh_hh_init(struct neighbour *n, struct dst_entry *dst,
 	//如果找到了，就直接返回，否则就创建一个
 	if (!hh && (hh = kzalloc(sizeof(*hh), GFP_ATOMIC)) != NULL) {//创建hh_cache缓存
 		seqlock_init(&hh->hh_lock);
-		hh->hh_type = protocol;
+		hh->hh_type = protocol;//记录协议
 		atomic_set(&hh->hh_refcnt, 0);
 		hh->hh_next = NULL;
-
+		//分配缓冲头部结构空间
 		if (dev->header_ops->cache(n, hh)) {//这里的cache以eth为例，cache是eth_header_cache()构造
 			kfree(hh);
 			hh = NULL;
@@ -1229,10 +1229,10 @@ static void neigh_hh_init(struct neighbour *n, struct dst_entry *dst,
 			atomic_inc(&hh->hh_refcnt);
 			hh->hh_next = n->hh;
 			n->hh	    = hh;
-			if (n->nud_state & NUD_CONNECTED)
-				hh->hh_output = n->ops->hh_output;
+			if (n->nud_state & NUD_CONNECTED)//如果邻居结构处于连接状态
+				hh->hh_output = n->ops->hh_output;//设置发送函数
 			else
-				hh->hh_output = n->ops->output;
+				hh->hh_output = n->ops->output;//设置发送函数
 		}
 	}
 	if (hh)	{

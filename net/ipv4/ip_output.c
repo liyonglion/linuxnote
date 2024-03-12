@@ -93,21 +93,21 @@ __inline__ void ip_send_check(struct iphdr *iph)
 
 int __ip_local_out(struct sk_buff *skb)
 {
-	struct iphdr *iph = ip_hdr(skb);
+	struct iphdr *iph = ip_hdr(skb);//取得数据块中的 IP头部指针
 
-	iph->tot_len = htons(skb->len);
-	ip_send_check(iph);
+	iph->tot_len = htons(skb->len);//记录数据块的总长度
+	ip_send_check(iph);//生产校验和
 	return nf_hook(PF_INET, NF_INET_LOCAL_OUT, skb, NULL, skb->dst->dev,
-		       dst_output);
+		       dst_output);//注意这里传递了发送函数指针dst_output()
 }
 
 int ip_local_out(struct sk_buff *skb)
 {
 	int err;
 
-	err = __ip_local_out(skb);
-	if (likely(err == 1))
-		err = dst_output(skb);
+	err = __ip_local_out(skb);//通过 Netfilter 发送数据包
+	if (likely(err == 1))//不能使用 Netfilter
+		err = dst_output(skb);//直接发送数据包
 
 	return err;
 }
@@ -175,40 +175,45 @@ int ip_build_and_send_pkt(struct sk_buff *skb, struct sock *sk,
 }
 
 EXPORT_SYMBOL_GPL(ip_build_and_send_pkt);
-
+/*
+函数要检查数据块头部空间的长度能否满足以太网协议头部的要求,因为下一步要交给网卡去处理,要保证为以太网协议头部留出空间。
+如果空间不足就要调用skb_realloc_headroom()函数重新分配数据包并把原来的数据复制到新数据包中,此函数的作用比较单一。
+分配成功后还要与客户端sock结构挂钩,释放原来的数据包改用新分配的数据包。
+*/
 static inline int ip_finish_output2(struct sk_buff *skb)
 {
-	struct dst_entry *dst = skb->dst;
+	struct dst_entry *dst = skb->dst;//获取路由项指针
 	struct rtable *rt = (struct rtable *)dst;
-	struct net_device *dev = dst->dev;
-	unsigned int hh_len = LL_RESERVED_SPACE(dev);
+	struct net_device *dev = dst->dev;//取得网络设备指针
+	unsigned int hh_len = LL_RESERVED_SPACE(dev);//以太网头部长度
 
-	if (rt->rt_type == RTN_MULTICAST)
-		IP_INC_STATS(IPSTATS_MIB_OUTMCASTPKTS);
-	else if (rt->rt_type == RTN_BROADCAST)
-		IP_INC_STATS(IPSTATS_MIB_OUTBCASTPKTS);
+	if (rt->rt_type == RTN_MULTICAST)//是否属组播类型
+		IP_INC_STATS(IPSTATS_MIB_OUTMCASTPKTS);//递增发送组播数据包计数
+	else if (rt->rt_type == RTN_BROADCAST)//是否广播类型
+		IP_INC_STATS(IPSTATS_MIB_OUTBCASTPKTS);//递增发送广播数据包计数
 
 	/* Be paranoid, rather than too clever. */
+	//检查数据块头部空间和链路层函数表
 	if (unlikely(skb_headroom(skb) < hh_len && dev->header_ops)) {
 		struct sk_buff *skb2;
-
+		//头部空间不足,重新分配新的数据包,并复制原有内容到新数据包
 		skb2 = skb_realloc_headroom(skb, LL_RESERVED_SPACE(dev));
 		if (skb2 == NULL) {
 			kfree_skb(skb);
 			return -ENOMEM;
 		}
 		if (skb->sk)
-			skb_set_owner_w(skb2, skb->sk);
-		kfree_skb(skb);
-		skb = skb2;
+			skb_set_owner_w(skb2, skb->sk);//新数据包与 sock 结构挂钩
+		kfree_skb(skb);//释放原来的数据包
+		skb = skb2;//指向新数据包
 	}
 
-	if (dst->hh)
-		return neigh_hh_output(dst->hh, skb);
-	else if (dst->neighbour)
-		return dst->neighbour->output(skb);
+	if (dst->hh)//是否缓存了以太网头部，它由neighhhinit()函数初始化
+		return neigh_hh_output(dst->hh, skb);//调用缓冲头部结构的发送函数
+	else if (dst->neighbour)//是否指定了邻居结构
+		return dst->neighbour->output(skb);//调用邻居结构的发送函数。neigh_resolve_output()函数
 
-	if (net_ratelimit())
+	if (net_ratelimit())//打印限速
 		printk(KERN_DEBUG "ip_finish_output2: No header cache and no neighbour!\n");
 	kfree_skb(skb);
 	return -EINVAL;
@@ -231,10 +236,11 @@ static int ip_finish_output(struct sk_buff *skb)
 		return dst_output(skb);
 	}
 #endif
+	//如果数据块的总长度超过MTU,并且没有指定分段数据包大小
 	if (skb->len > ip_skb_dst_mtu(skb) && !skb_is_gso(skb))
-		return ip_fragment(skb, ip_finish_output2);
+		return ip_fragment(skb, ip_finish_output2);//调用分段函数，分段数据包发送
 	else
-		return ip_finish_output2(skb);
+		return ip_finish_output2(skb);//直接发送数据包
 }
 
 int ip_mc_output(struct sk_buff *skb)
@@ -298,12 +304,12 @@ int ip_mc_output(struct sk_buff *skb)
 
 int ip_output(struct sk_buff *skb)
 {
-	struct net_device *dev = skb->dst->dev;
+	struct net_device *dev = skb->dst->dev;//取得设备结构指针
 
-	IP_INC_STATS(IPSTATS_MIB_OUTREQUESTS);
+	IP_INC_STATS(IPSTATS_MIB_OUTREQUESTS);//递增输出请求计数器
 
-	skb->dev = dev;
-	skb->protocol = htons(ETH_P_IP);
+	skb->dev = dev;//记录路由项指定的设备
+	skb->protocol = htons(ETH_P_IP);//设置协议
 
 	return NF_HOOK_COND(PF_INET, NF_INET_POST_ROUTING, skb, NULL, dev,
 			    ip_finish_output,
@@ -314,81 +320,81 @@ int ip_queue_xmit(struct sk_buff *skb, int ipfragok)
 {
 	struct sock *sk = skb->sk;
 	struct inet_sock *inet = inet_sk(sk);
-	struct ip_options *opt = inet->opt;
+	struct ip_options *opt = inet->opt;//获取设置的IP选项
 	struct rtable *rt;
 	struct iphdr *iph;
 
 	/* Skip all of this if the packet is already routed,
 	 * f.e. by something like SCTP.
 	 */
-	rt = skb->rtable;
+	rt = skb->rtable;//路由缓存项
 	if (rt != NULL)
 		goto packet_routed;
 
 	/* Make sure we can route this packet. */
-	rt = (struct rtable *)__sk_dst_check(sk, 0);
-	if (rt == NULL) {
+	rt = (struct rtable *)__sk_dst_check(sk, 0);//检测路由项并转换为路由表指针
+	if (rt == NULL) {//没有获取到路由项
 		__be32 daddr;
 
 		/* Use correct destination address if we have options. */
-		daddr = inet->daddr;
-		if(opt && opt->srr)
-			daddr = opt->faddr;
+		daddr = inet->daddr;//获取目标地址
+		if(opt && opt->srr)//如果设置了IP选项并指定了源路由
+			daddr = opt->faddr;//将转发地址作为目标地址
 
 		{
 			struct flowi fl = { .oif = sk->sk_bound_dev_if,
 					    .nl_u = { .ip4_u =
-						      { .daddr = daddr,
-							.saddr = inet->saddr,
-							.tos = RT_CONN_FLAGS(sk) } },
-					    .proto = sk->sk_protocol,
+						      { .daddr = daddr,//目标地址
+							.saddr = inet->saddr,//源地址
+							.tos = RT_CONN_FLAGS(sk) } },//TOS值
+					    .proto = sk->sk_protocol,//TCP协议
 					    .uli_u = { .ports =
-						       { .sport = inet->sport,
-							 .dport = inet->dport } } };
+						       { .sport = inet->sport,//源端口
+							 .dport = inet->dport } } };//目标端口
 
 			/* If this fails, retransmit mechanism of transport layer will
 			 * keep trying until route appears or the connection times
 			 * itself out.
 			 */
 			security_sk_classify_flow(sk, &fl);
-			if (ip_route_output_flow(sock_net(sk), &rt, &fl, sk, 0))
+			if (ip_route_output_flow(sock_net(sk), &rt, &fl, sk, 0))//查找路由项，没有就创建路由项
 				goto no_route;
 		}
-		sk_setup_caps(sk, &rt->u.dst);
+		sk_setup_caps(sk, &rt->u.dst);//设置分段标志和分段值.增加兼容标志位的GSO分段标志
 	}
-	skb->dst = dst_clone(&rt->u.dst);
+	skb->dst = dst_clone(&rt->u.dst);//记录路由项
 
 packet_routed:
 	if (opt && opt->is_strictroute && rt->rt_dst != rt->rt_gateway)
-		goto no_route;
+		goto no_route;//是否设置了IP选项,是否属强制路由，目标地址是否为网关
 
 	/* OK, we know where to send it, allocate and build IP header. */
-	skb_push(skb, sizeof(struct iphdr) + (opt ? opt->optlen : 0));
-	skb_reset_network_header(skb);
-	iph = ip_hdr(skb);
+	skb_push(skb, sizeof(struct iphdr) + (opt ? opt->optlen : 0));//向下延伸数据块的起始地址，分配IP头部空间
+	skb_reset_network_header(skb);//网络层头部指针指向IP头部位置
+	iph = ip_hdr(skb);//取得数据块中的IP头部指针
 	*((__be16 *)iph) = htons((4 << 12) | (5 << 8) | (inet->tos & 0xff));
-	if (ip_dont_fragment(sk, &rt->u.dst) && !ipfragok)
-		iph->frag_off = htons(IP_DF);
+	if (ip_dont_fragment(sk, &rt->u.dst) && !ipfragok)//如果不允许分段
+		iph->frag_off = htons(IP_DF);//设置禁止分段标志
 	else
 		iph->frag_off = 0;
-	iph->ttl      = ip_select_ttl(inet, &rt->u.dst);
-	iph->protocol = sk->sk_protocol;
-	iph->saddr    = rt->rt_src;
-	iph->daddr    = rt->rt_dst;
+	iph->ttl      = ip_select_ttl(inet, &rt->u.dst);//设置ttl
+	iph->protocol = sk->sk_protocol;//记录协议
+	iph->saddr    = rt->rt_src;//记录源地址
+	iph->daddr    = rt->rt_dst;//记录目标地址
 	/* Transport layer set skb->h.foo itself. */
 
-	if (opt && opt->optlen) {
-		iph->ihl += opt->optlen >> 2;
-		ip_options_build(skb, opt, inet->daddr, rt, 0);
+	if (opt && opt->optlen) {//如果设置了IP选项并且指明了长度
+		iph->ihl += opt->optlen >> 2;//调整IP头部的长度
+		ip_options_build(skb, opt, inet->daddr, rt, 0);//在头部中记录IP选项，在源路由中记录目标地址，记录时间戳
 	}
 
 	ip_select_ident_more(iph, &rt->u.dst, sk,
-			     (skb_shinfo(skb)->gso_segs ?: 1) - 1);
+			     (skb_shinfo(skb)->gso_segs ?: 1) - 1);//设置IP头部的标识ID
 
-	skb->priority = sk->sk_priority;
-	skb->mark = sk->sk_mark;
+	skb->priority = sk->sk_priority;//记录优先级
+	skb->mark = sk->sk_mark;//记录掩码
 
-	return ip_local_out(skb);
+	return ip_local_out(skb);//继续发送数据包
 
 no_route:
 	IP_INC_STATS(IPSTATS_MIB_OUTNOROUTES);

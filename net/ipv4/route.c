@@ -1132,23 +1132,23 @@ static void ip_select_fb_ident(struct iphdr *iph)
 
 void __ip_select_ident(struct iphdr *iph, struct dst_entry *dst, int more)
 {
-	struct rtable *rt = (struct rtable *) dst;
+	struct rtable *rt = (struct rtable *) dst;//获取路由项
 
 	if (rt) {
 		if (rt->peer == NULL)
-			rt_bind_peer(rt, 1);
+			rt_bind_peer(rt, 1);//查找对方信息结构,如果不存在就创建
 
 		/* If peer is attached to destination, it is never detached,
 		   so that we need not to grab a lock to dereference it.
 		 */
-		if (rt->peer) {
+		if (rt->peer) {//找到或者创建了对方信息结构
 			iph->id = htons(inet_getid(rt->peer, more));
 			return;
 		}
 	} else
 		printk(KERN_DEBUG "rt_bind_peer(0) @%p\n",
 		       __builtin_return_address(0));
-
+	//如果没有路由表,就会进人ip_select fbident()函数中生成一个 ID.
 	ip_select_fb_ident(iph);
 }
 
