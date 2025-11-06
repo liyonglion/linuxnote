@@ -559,19 +559,20 @@ void sock_release(struct socket *sock)
 static inline int __sock_sendmsg(struct kiocb *iocb, struct socket *sock,
 				 struct msghdr *msg, size_t size)
 {
-	struct sock_iocb *si = kiocb_to_siocb(iocb);
+	struct sock_iocb *si = kiocb_to_siocb(iocb);//socket的IO控制结构
 	int err;
 
-	si->sock = sock;
-	si->scm = NULL;
-	si->msg = msg;
-	si->size = size;
+	si->sock = sock;//记录socket指针
+	si->scm = NULL;//身份结构为空
+	si->msg = msg;//记录消息结构
+	si->size = size;//记录缓冲区长度
 
-	err = security_socket_sendmsg(sock, msg, size);
+	err = security_socket_sendmsg(sock, msg, size);//安全检查
 	if (err)
 		return err;
-
-	return sock->ops->sendmsg(iocb, sock, msg, size);
+	//创建套接字时，inet_create为sock->ops指定具体的协议族操作集。如果是SOCK_STREAM,则ops指向的操作集等同于inet_stream_ops,
+	//即ops->sendmsg指向 inet_sendmsg 函数。
+	return sock->ops->sendmsg(iocb, sock, msg, size);//调用inet_sendmsg()函数
 }
 
 int sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
@@ -582,7 +583,7 @@ int sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 
 	init_sync_kiocb(&iocb, NULL);
 	iocb.private = &siocb;
-	ret = __sock_sendmsg(&iocb, sock, msg, size);
+	ret = __sock_sendmsg(&iocb, sock, msg, size);//具体的发送数据
 	if (-EIOCBQUEUED == ret)
 		ret = wait_on_sync_kiocb(&iocb);
 	return ret;
@@ -641,19 +642,19 @@ static inline int __sock_recvmsg(struct kiocb *iocb, struct socket *sock,
 				 struct msghdr *msg, size_t size, int flags)
 {
 	int err;
-	struct sock_iocb *si = kiocb_to_siocb(iocb);
+	struct sock_iocb *si = kiocb_to_siocb(iocb);//socket 的IO控制结构
 
-	si->sock = sock;
-	si->scm = NULL;
-	si->msg = msg;
-	si->size = size;
-	si->flags = flags;
+	si->sock = sock;//记录 socket指针
+	si->scm = NULL;//身份结构为空
+	si->msg = msg;//记录消息结构
+	si->size = size;//记录缓冲区长度
+	si->flags = flags;//记录标志位
 
 	err = security_socket_recvmsg(sock, msg, size, flags);
 	if (err)
 		return err;
 
-	return sock->ops->recvmsg(iocb, sock, msg, size, flags);
+	return sock->ops->recvmsg(iocb, sock, msg, size, flags);//调用 socket 函数表的接收。sock_common_recvmsg()
 }
 
 int sock_recvmsg(struct socket *sock, struct msghdr *msg,
@@ -739,20 +740,20 @@ static ssize_t do_sock_read(struct msghdr *msg, struct kiocb *iocb,
 		struct file *file, const struct iovec *iov,
 		unsigned long nr_segs)
 {
-	struct socket *sock = file->private_data;
+	struct socket *sock = file->private_data;//从文件结构中取得 socket 指针
 	size_t size = 0;
 	int i;
 
 	for (i = 0; i < nr_segs; i++)
-		size += iov[i].iov_len;
+		size += iov[i].iov_len;//计数缓冲区的总长度
 
-	msg->msg_name = NULL;
-	msg->msg_namelen = 0;
-	msg->msg_control = NULL;
-	msg->msg_controllen = 0;
-	msg->msg_iov = (struct iovec *)iov;
-	msg->msg_iovlen = nr_segs;
-	msg->msg_flags = (file->f_flags & O_NONBLOCK) ? MSG_DONTWAIT : 0;
+	msg->msg_name = NULL;//socket 地址
+	msg->msg_namelen = 0;//socket地址长度
+	msg->msg_control = NULL;//附加消息
+	msg->msg_controllen = 0;//附加消息长度
+	msg->msg_iov = (struct iovec *)iov;//记录缓冲区结构指针
+	msg->msg_iovlen = nr_segs;//记录缓冲区的数量
+	msg->msg_flags = (file->f_flags & O_NONBLOCK) ? MSG_DONTWAIT : 0;//设置阻塞标志
 
 	return __sock_recvmsg(iocb, sock, msg, size, msg->msg_flags);
 }
@@ -760,16 +761,16 @@ static ssize_t do_sock_read(struct msghdr *msg, struct kiocb *iocb,
 static ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,
 				unsigned long nr_segs, loff_t pos)
 {
-	struct sock_iocb siocb, *x;
+	struct sock_iocb siocb, *x;//socket IO控制结构
 
-	if (pos != 0)
+	if (pos != 0)//检查起始地址
 		return -ESPIPE;
-
+	//如果接收长度为0就返回
 	if (iocb->ki_left == 0)	/* Match SYS5 behaviour */
 		return 0;
 
 
-	x = alloc_sock_iocb(iocb, &siocb);
+	x = alloc_sock_iocb(iocb, &siocb);//分配、初始化socket的I0控制结构,与I0请求结构挂钩
 	if (!x)
 		return -ENOMEM;
 	return do_sock_read(&x->async_msg, iocb, iocb->ki_filp, iov, nr_segs);
@@ -1164,7 +1165,7 @@ static int __sock_create(struct net *net, int family, int type, int protocol,
 #endif
 
 	rcu_read_lock();
-	//获取协议族类型。对于AF_NET 是inet_family_ops，AF_UNIX是unix_family_ops，AF_NET6是inet6_family_ops。每个协议族都要调用sock_register()将对应协议注册进net_families中
+	//获取协议族类型。在inet_init()中调用sock_register()注册进net_families中。对于AF_NET 是inet_family_ops，AF_UNIX是unix_family_ops，AF_NET6是inet6_family_ops。每个协议族都要调用sock_register()将对应协议注册进net_families中
 	pf = rcu_dereference(net_families[family]);
 	err = -EAFNOSUPPORT;
 	if (!pf)
@@ -1179,7 +1180,8 @@ static int __sock_create(struct net *net, int family, int type, int protocol,
 
 	/* Now protected by module ref count */
 	rcu_read_unlock();
-	//创建对应type类型的struct sock。也就是TCP层的sock。AF_NET的create是inet_create
+	//创建对应type类型的struct sock,也就是TCP层的sock。AF_NET的create是inet_create
+	//net 为当前网络命名空间，pf为协议族类型，protocol为协议类型
 	err = pf->create(net, sock, protocol);
 	if (err < 0)
 		goto out_module_put;
@@ -1226,7 +1228,7 @@ int sock_create_kern(int family, int type, int protocol, struct socket **res)
 {
 	return __sock_create(&init_net, family, type, protocol, res, 1);
 }
-
+//创建socket。 sockfd = socket(int socket_family, int socket_type, int protocol);eg: fd = socket(PF_INET, SOCK_STREAM, 0);
 asmlinkage long sys_socket(int family, int type, int protocol)
 {
 	int retval;
@@ -1235,7 +1237,7 @@ asmlinkage long sys_socket(int family, int type, int protocol)
 	retval = sock_create(family, type, protocol, &sock);
 	if (retval < 0)
 		goto out;
-	//将sock 映射到fd
+	//将socket 映射到fd
 	retval = sock_map_fd(sock);
 	if (retval < 0)
 		goto out_release;
@@ -1455,7 +1457,7 @@ asmlinkage long sys_accept(int fd, struct sockaddr __user *upeer_sockaddr,
 	err = security_socket_accept(sock, newsock);
 	if (err)
 		goto out_fd;
-	//调用具体的协议族accept函数，即inet_accept
+	//调用具体的协议族accept函数，即 inet_accept
 	err = sock->ops->accept(sock, newsock, sock->file->f_flags);
 	if (err < 0)
 		goto out_fd;
@@ -1523,7 +1525,7 @@ asmlinkage long sys_connect(int fd, struct sockaddr __user *uservaddr,
 		goto out_put;
 
 	err =
-	    security_socket_connect(sock, (struct sockaddr *)address, addrlen);
+	    security_socket_connect(sock, (struct sockaddr *)address, addrlen);//IP安全相关，暂时忽略
 	if (err)
 		goto out_put;
 
@@ -1608,38 +1610,38 @@ asmlinkage long sys_sendto(int fd, void __user *buff, size_t len,
 			   int addr_len)
 {
 	struct socket *sock;
-	char address[MAX_SOCK_ADDR];
+	char address[MAX_SOCK_ADDR];//内核目的地址
 	int err;
-	struct msghdr msg;
-	struct iovec iov;
+	struct msghdr msg;//消息结构
+	struct iovec iov;//缓冲区结构
 	int fput_needed;
 
-	sock = sockfd_lookup_light(fd, &err, &fput_needed);
+	sock = sockfd_lookup_light(fd, &err, &fput_needed);//通过fd在进程中找到socket指针
 	if (!sock)
 		goto out;
 
-	iov.iov_base = buff;
-	iov.iov_len = len;
-	msg.msg_name = NULL;
-	msg.msg_iov = &iov;
-	msg.msg_iovlen = 1;
-	msg.msg_control = NULL;
-	msg.msg_controllen = 0;
-	msg.msg_namelen = 0;
+	iov.iov_base = buff;//用户数据缓冲区
+	iov.iov_len = len;//用户数据长度
+	msg.msg_name = NULL;//socket地址
+	msg.msg_iov = &iov;//记录用户数据缓存结构
+	msg.msg_iovlen = 1;//队列中缓冲区数量
+	msg.msg_control = NULL;//附加消息为空
+	msg.msg_controllen = 0;//附加消息长度
+	msg.msg_namelen = 0;//socket地址长度
 	if (addr) {
-		err = move_addr_to_kernel(addr, addr_len, address);
+		err = move_addr_to_kernel(addr, addr_len, address);//如果指定了socket地址,将它从用户空间复制到这里的数组中
 		if (err < 0)
 			goto out_put;
-		msg.msg_name = address;
-		msg.msg_namelen = addr_len;
+		msg.msg_name = address;//记录socket地址
+		msg.msg_namelen = addr_len;//socket地址长度
 	}
-	if (sock->file->f_flags & O_NONBLOCK)
-		flags |= MSG_DONTWAIT;
-	msg.msg_flags = flags;
+	if (sock->file->f_flags & O_NONBLOCK)//非阻塞模式
+		flags |= MSG_DONTWAIT;//设置非阻塞模式
+	msg.msg_flags = flags;//设置非阻塞标志
 	err = sock_sendmsg(sock, &msg, len);
 
 out_put:
-	fput_light(sock->file, fput_needed);
+	fput_light(sock->file, fput_needed);//释放文件指针	
 out:
 	return err;
 }
@@ -1727,14 +1729,14 @@ asmlinkage long sys_setsockopt(int fd, int level, int optname,
 		if (err)
 			goto out_put;
 
-		if (level == SOL_SOCKET)
+		if (level == SOL_SOCKET) //设置套接字选项
 			err =
 			    sock_setsockopt(sock, level, optname, optval,
-					    optlen);
-		else
+					    optlen);//设置套接字选项
+		else//设置其他选项，例如IP选项
 			err =
 			    sock->ops->setsockopt(sock, level, optname, optval,
-						  optlen);
+						  optlen);//调用sock_common_setsockopt()函数
 out_put:
 		fput_light(sock->file, fput_needed);
 	}
@@ -2135,7 +2137,8 @@ int sock_register(const struct net_proto_family *ops)
 	}
 
 	spin_lock(&net_family_lock);
-	if (net_families[ops->family])
+	//向net_families数组添加协议族套接字的创建方法，该方法通过参数ops得到
+	if (net_families[ops->family])//协议族已经存在
 		err = -EEXIST;
 	else {
 		net_families[ops->family] = ops;//将操作登记到全局数组中
@@ -2172,22 +2175,22 @@ void sock_unregister(int family)
 
 	printk(KERN_INFO "NET: Unregistered protocol family %d\n", family);
 }
-
+// sock_init 是通用套接字初始化。初始化核心核心套接字基础设施(如sockfs文件系统、通用套接字缓存、SLAB分配器等等)。需在内核 ​​最早阶段​​ 完成，因为它是所有协议族（如 INET、UNIX、NETLINK）的基础设施。
 static int __init sock_init(void)
 {
 	/*
 	 *      Initialize sock SLAB cache.
 	 */
-
+	//初始化套接字结构
 	sk_init();
 
 	/*
-	 *      Initialize skbuff SLAB cache
+	 *      Initialize skbuff SLAB cache。初始化套接字缓冲区
 	 */
 	skb_init();
 
 	/*
-	 *      Initialize the protocols module.
+	 *      Initialize the protocols module.初始化并注册文件系统
 	 */
 
 	init_inodecache();

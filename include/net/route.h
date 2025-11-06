@@ -150,7 +150,9 @@ static inline char rt_tos2priority(u8 tos)
 {
 	return ip_tos2prio[IPTOS_TOS(tos)>>1];
 }
-
+/*
+返回路由表信息，为后续的数据包发送提供路由出口信息，从而提高路由查询效率
+*/
 static inline int ip_route_connect(struct rtable **rp, __be32 dst,
 				   __be32 src, u32 tos, int oif, u8 protocol,
 				   __be16 sport, __be16 dport, struct sock *sk,

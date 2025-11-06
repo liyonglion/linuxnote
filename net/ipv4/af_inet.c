@@ -123,7 +123,7 @@ extern void ip_mc_drop_socket(struct sock *sk);
 /* The inetsw table contains everything that inet_create needs to
  * build a new socket.
  */
-static struct list_head inetsw[SOCK_MAX];
+static struct list_head inetsw[SOCK_MAX];//具体类型为：struct inet_protosw。这个地方之所以用list，因为inetsw的下标为socket_type（socket(int socket_family, int socket_type, int protocol);），可能存在多个protocol，对于tcp、udp而言protocol为0
 static DEFINE_SPINLOCK(inetsw_lock);
 
 struct ipv4_config ipv4_config;
@@ -338,7 +338,7 @@ lookup_protocol:
 	}
 
 	err = -EPERM;
-	//兼容性进行检测。TCP udp的能力都是-1，
+	//兼容性进行检测。TCP、udp的能力都是-1，
 	if (answer->capability > 0 && !capable(answer->capability))
 		goto out_rcu_unlock;
 
@@ -347,8 +347,8 @@ lookup_protocol:
 		goto out_rcu_unlock;
 	//对struct socket->ops 进行赋值
 	sock->ops = answer->ops;//例如inet_stream_ops,inet_dgram_ops,inet_sockraw_opt。具体参看inetsw_array全局变量
-	answer_prot = answer->prot;//例如tcp_prot,udp_prot,raw_prot。具体参看inetsw_array全局变量
-	answer_no_check = answer->no_check;//具体参看inetsw_array全局变量对应成员
+	answer_prot = answer->prot;//例如 tcp_prot,udp_prot,raw_prot。具体参看inetsw_array全局变量
+	answer_no_check = answer->no_check;//是否需要检查校验和。具体参看inetsw_array全局变量对应成员。
 	answer_flags = answer->flags;//具体参看inetsw_array全局变量对应成员
 	rcu_read_unlock();
 
@@ -361,12 +361,12 @@ lookup_protocol:
 		goto out;
 
 	err = 0;
-	sk->sk_no_check = answer_no_check;
+	sk->sk_no_check = answer_no_check;//默认的TCP、UDP都是需要校验数据包校验位
 	if (INET_PROTOSW_REUSE & answer_flags)//协议是否自动支持端口复用？udp支持，TCP不支持自动
 		sk->sk_reuse = 1;
-
+	//初始化struct inet_sock，inet_sock是IPv4/IPv6 基础层
 	inet = inet_sk(sk);
-	inet->is_icsk = (INET_PROTOSW_ICSK & answer_flags) != 0;//标识是否是inet_connection_sock类型
+	inet->is_icsk = (INET_PROTOSW_ICSK & answer_flags) != 0;//标识是inet_connection_sock类型，标识子对象是否是inet_connection_sock类型
 
 	if (SOCK_RAW == sock->type) {
 		inet->num = protocol;
@@ -375,17 +375,17 @@ lookup_protocol:
 	}
 
 	if (ipv4_config.no_pmtu_disc)
-		inet->pmtudisc = IP_PMTUDISC_DONT;
+		inet->pmtudisc = IP_PMTUDISC_DONT;//禁止PMTU探测
 	else
-		inet->pmtudisc = IP_PMTUDISC_WANT;
+		inet->pmtudisc = IP_PMTUDISC_WANT;//允许PMTU探测
 
-	inet->id = 0;
+	inet->id = 0;//初始化流标识
 	//对sk进行初始化
 	sock_init_data(sock, sk);
 
 	sk->sk_destruct	   = inet_sock_destruct;
 	sk->sk_family	   = PF_INET;
-	sk->sk_protocol	   = protocol;
+	sk->sk_protocol	   = protocol;//协议类型，具体为IP头中的protocol。IPPROTO_TCP=6，IPPROTO_UDP=17
 	sk->sk_backlog_rcv = sk->sk_prot->backlog_rcv;
 	//初始化struct inet_sock
 	inet->uc_ttl	= -1;
@@ -407,7 +407,7 @@ lookup_protocol:
 		sk->sk_prot->hash(sk);
 	}
 	//调用具体的TCP层socket类型进行初始化。例如TCP中init为tcp_v4_init_sock()，这个主要初始化struct tcp_sock 对象
-	if (sk->sk_prot->init) {
+	if (sk->sk_prot->init) {//调用具体协议的初始化函数，这里面会对某些字段赋值为协议特有的值
 		err = sk->sk_prot->init(sk);
 		if (err)
 			sk_common_release(sk);
@@ -610,7 +610,7 @@ int inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 		break;
 	case SS_UNCONNECTED://未连接就执行协议结构的连接函数
 		err = -EISCONN;
-		if (sk->sk_state != TCP_CLOSE)
+		if (sk->sk_state != TCP_CLOSE)//调用connect只能是创建socket，所以状态必须是TCP_CLOSE
 			goto out;
 		//调用tcp层的connect函数。tcp_v4_connect()
 		err = sk->sk_prot->connect(sk, uaddr, addr_len);
@@ -631,7 +631,7 @@ int inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 
 	if ((1 << sk->sk_state) & (TCPF_SYN_SENT | TCPF_SYN_RECV)) {
 		/* Error code is set above */
-		if (!timeo || !inet_wait_for_connect(sk, timeo))//定时等待连接
+		if (!timeo || !inet_wait_for_connect(sk, timeo))//定时等待连接。会在完成三次握手后返回(唤醒)
 			goto out;
 
 		err = sock_intr_errno(timeo);//超时错误码
@@ -726,12 +726,12 @@ int inet_getname(struct socket *sock, struct sockaddr *uaddr,
 int inet_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 		 size_t size)
 {
-	struct sock *sk = sock->sk;
+	struct sock *sk = sock->sk;//获取套接字在传输层的struct sock表示结构
 
 	/* We may need to bind the socket. */
 	if (!inet_sk(sk)->num && inet_autobind(sk))
 		return -EAGAIN;
-
+	//调用传输层的数据发送方法:tcp_sendmsg
 	return sk->sk_prot->sendmsg(iocb, sk, msg, size);
 }
 
@@ -948,19 +948,20 @@ static struct net_proto_family inet_family_ops = {
 
 /* Upon startup we insert all the elements in inetsw_array[] into
  * the linked list inetsw.
+ socket层通过type字段和传输层协议关联起来。例如创建socket的时候，指定的type为SOCK_STREAM,那么可以将ops赋值给socket结构体的ops，tcp_prot赋值给sock结构体中的prot字段。
  */
 static struct inet_protosw inetsw_array[] =
 {
 	{
 		.type =       SOCK_STREAM,
 		.protocol =   IPPROTO_TCP,//协议标识码。此处并不是创建socket的时候传入的protocol字段
-		.prot =       &tcp_prot,
-		.ops =        &inet_stream_ops,
+		.prot =       &tcp_prot, //TCP协议
+		.ops =        &inet_stream_ops,//在socket层叫STREAM
 		.capability = -1,
 		.no_check =   0,
 		.flags =      INET_PROTOSW_PERMANENT |
-			      INET_PROTOSW_ICSK,
-	},
+			      INET_PROTOSW_ICSK,//INET_PROTOSW_ICSK告诉内核：TCP 需要连接管理（如 inet_connection_sock结构体、状态机）
+	}, //将socket层的STREAM和TCP协议关联起来
 
 	{
 		.type =       SOCK_DGRAM,
@@ -970,7 +971,7 @@ static struct inet_protosw inetsw_array[] =
 		.capability = -1,
 		.no_check =   UDP_CSUM_DEFAULT,
 		.flags =      INET_PROTOSW_PERMANENT,
-       },
+       }, //将socket层的DGRAM和UDP协议关联起来
 
 
        {
@@ -985,7 +986,12 @@ static struct inet_protosw inetsw_array[] =
 };
 
 #define INETSW_ARRAY_LEN ARRAY_SIZE(inetsw_array)
-
+/*
+核心功能​​：将 struct inet_protosw描述的协议（如 TCP/UDP）注册到内核的全局协议链表 inetsw中，完成以下关键任务：
+	1. 将协议插入到协议哈希表，支持通过 ​​Socket 类型（如 SOCK_STREAM）​​ 和 ​​协议号（如 IPPROTO_TCP）​​ 快速查找。
+	2. 关联协议的 ​​操作集（proto_ops）​​ 和 ​​实现（proto）​​，建立 Socket 层与传输层的桥梁。
+	3. 根据协议的 flags（如 INET_PROTOSW_ICSK）初始化协议特有行为（如连接管理）。
+*/
 void inet_register_protosw(struct inet_protosw *p)
 {
 	struct list_head *lh;
@@ -1000,13 +1006,19 @@ void inet_register_protosw(struct inet_protosw *p)
 
 	/* If we are trying to override a permanent protocol, bail. */
 	answer = NULL;
-	last_perm = &inetsw[p->type];
-	list_for_each(lh, &inetsw[p->type]) {
-		answer = list_entry(lh, struct inet_protosw, list);
+	last_perm = &inetsw[p->type];//套接字类型第一个协议
+	/*
+		socket(int domain, int type ,int protocol);
+		domain: 表示协议族，如AF_INET
+		type:表示套接字类型。如SOCK_STREAM，SOCK_STREAM是一种通信语义（面向连接的字节流）。而 TCP 是实现这种语义的一种协议。未来可能有其他协议也实现 SOCK_STREAM特性（例如实验性可靠传输协议）。此时可通过 protocol区分。
+		protocol:表示协议编号。
+	*/
+	list_for_each(lh, &inetsw[p->type]) {//在同一个套接字类型下，可能存在多个协议。
+		answer = list_entry(lh, struct inet_protosw, list);//当前的具体协议
 
 		/* Check only the non-wild match. 查找匹配的队列*/
-		if (INET_PROTOSW_PERMANENT & answer->flags) {
-			if (protocol == answer->protocol)
+		if (INET_PROTOSW_PERMANENT & answer->flags) {//是否是永久协议
+			if (protocol == answer->protocol)//永久协议不允许覆盖
 				break;
 			last_perm = lh;//将inetsw_array中的元素逐一放入到数组队列inetsw中
 		}
@@ -1414,7 +1426,9 @@ static struct packet_type ip_packet_type = {
 	.gso_send_check = inet_gso_send_check,
 	.gso_segment = inet_gso_segment,
 };
-
+//注册 IPv4 协议族（AF_INET），包括 TCP、UDP、RAW 协议的具体实现。
+//初始化 INET 特有的数据结构（如哈希表、协议操作集）。在fs_initcall/subsys_initcall​​进行调用。
+//sock_init使用core_initcall进行调用 所以在inet_init之前调用
 static int __init inet_init(void)
 {
 	struct sk_buff *dummy_skb;
@@ -1423,7 +1437,7 @@ static int __init inet_init(void)
 	int rc = -EINVAL;
 
 	BUILD_BUG_ON(sizeof(struct inet_skb_parm) > sizeof(dummy_skb->cb));
-
+	//注册tcp协议，注册到全局变量proto_list中
 	rc = proto_register(&tcp_prot, 1);
 	if (rc)
 		goto out;
@@ -1439,13 +1453,13 @@ static int __init inet_init(void)
 	/*
 	 *	Tell SOCKET that we are alive...
 	 */
-	//注册af_net协议族
+	//注册af_net协议族。创建socket的时候socket(int socket_family, int socket_type, int protocol);会指定socket_family为AF_INET，然后调用inet_family_ops->create()函数创建socket
 	(void)sock_register(&inet_family_ops);
 
 	/*
 	 *	Add all the base protocols.
 	 */
-
+	//向网络层注册协议层处理函数(通过IP头部的协议号来区分，这里注册对应的协议号处理函数)
 	if (inet_add_protocol(&icmp_protocol, IPPROTO_ICMP) < 0)//登记ICMP函数表结构
 		printk(KERN_CRIT "inet_init: Cannot add ICMP protocol\n");
 	if (inet_add_protocol(&udp_protocol, IPPROTO_UDP) < 0)
@@ -1458,8 +1472,9 @@ static int __init inet_init(void)
 #endif
 
 	/* Register the socket-side information for inet_create. */
+	/*向协议族中注册具体的socket_type处理函数*/
 	for (r = &inetsw[0]; r < &inetsw[SOCK_MAX]; ++r)
-		INIT_LIST_HEAD(r);
+		INIT_LIST_HEAD(r);//初始化链表结构
 	//处理inetsw_array数组中的元素，并将他们依次登记到数组inetsw中
 	for (q = inetsw_array; q < &inetsw_array[INETSW_ARRAY_LEN]; ++q)
 		inet_register_protosw(q);
@@ -1475,7 +1490,7 @@ static int __init inet_init(void)
 	 */
 	//里面有初始化路由选项相关
 	ip_init();
-
+	//向命名空间内注册tcp网络子系统初始化
 	tcp_v4_init();
 
 	/* Setup TCP slab cache for open requests. */
@@ -1509,8 +1524,8 @@ static int __init inet_init(void)
 
 	ipv4_proc_init();
 
-	ipfrag_init();
-
+	ipfrag_init();//初始化IP分段相关
+	//向链路层注册IP协议，通过链路头中的type来识别IP协议
 	dev_add_pack(&ip_packet_type);
 
 	rc = 0;

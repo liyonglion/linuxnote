@@ -195,11 +195,14 @@ static inline void release_net(struct net *net)
 #define __net_exit	__exit_refok
 #define __net_initdata	__initdata
 #endif
-
+//命名空间内的各个组件都是在 setup_net 时初始化的，包括路由表、tcp 的 proc 伪文件系统、iptable 规则读取等等。
+//由于内核网络模块的复杂性，在内核中将网络模块划分成了各个子系统。每个子系统都定义了一个pernet_operations
+//各个子系统通过调用 register_pernet_subsys 或 register_pernet_device 将其初始化函数注册到网络命名空间系统的全局链表 pernet_list 中。
+//同样当新的命名空间创建时，会遍历该全局变量 pernet_list，执行每个子模块注册上来的初始化函数。
 struct pernet_operations {
 	struct list_head list; //用于挂载在net_namespace_list上的链表上
-	int (*init)(struct net *net); //初始化网络命名空间
-	void (*exit)(struct net *net);
+	int (*init)(struct net *net); //初始化网络命名空间子系统
+	void (*exit)(struct net *net); //退出网络命名空间子系统
 };
 
 extern int register_pernet_subsys(struct pernet_operations *);

@@ -830,9 +830,9 @@ static inline void netif_napi_add(struct net_device *dev,
 #endif
 	set_bit(NAPI_STATE_SCHED, &napi->state);
 }
-
+//网络层向链路层注册处理函数。链路层通过func通知网络层数据包
 struct packet_type {
-	__be16			type;	/* This is really htons(ether_type). */
+	__be16			type;	/* This is really htons(ether_type). 链路头中的Type类型*/
 	struct net_device	*dev;	/* NULL is wildcarded here	     */
 	int			(*func) (struct sk_buff *,
 					 struct net_device *,

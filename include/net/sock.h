@@ -245,7 +245,7 @@ struct sock {//tcp传输控制信息，描述tcp的自有特性，包括：接�
 	gfp_t			sk_allocation; //内核内存分配模式
 	int			sk_route_caps; //路由兼容标志位
 	int			sk_gso_type; //GSO通用分段类型
-	unsigned int		sk_gso_max_size; //GSO最大的长度
+	unsigned int		sk_gso_max_size; //GSO最大的长度，在sk_setup_caps()设置
 	int			sk_rcvlowat; //SO_RCVLOWAT设置
 	unsigned long 		sk_flags; //SO_LINGER (l onoff)，SO_BROADCAST，SO_KEEPALIVE,SO_OOBINLINE设置
 	unsigned long	        sk_lingertime; //停留时间，确定关闭时间
@@ -267,9 +267,9 @@ struct sock {//tcp传输控制信息，描述tcp的自有特性，包括：接�
 	ktime_t			sk_stamp; //最后接收包时间
 	struct socket		*sk_socket; //指向struct socket指针
 	void			*sk_user_data; //RPC提供的数据
-	struct page		*sk_sndmsg_page; //发送数据块所在的缓冲页
+	struct page		*sk_sndmsg_page; //发送数据块所在的缓冲页。网卡支持S-G IO，数据都保存在缓冲页中，sk_sndmsg_page表示最后一个可以写入数据的页，可以快速进行写入数据
 	struct sk_buff		*sk_send_head;//发送数据包的队列头
-	__u32			sk_sndmsg_off; //发送数据块在缓冲页的结尾
+	__u32			sk_sndmsg_off; //发送数据块在缓冲页的大小，实际上是sk_sndmsg_page的偏移，指向可以写入数据的偏移
 	int			sk_write_pending; //等待发送的数量
 	void			*sk_security; //安全模式相关
 	__u32			sk_mark; //通用数据包掩码
@@ -513,7 +513,10 @@ struct raw_hashinfo;
  * socket layer -> transport layer interface
  * transport -> network interface is defined by struct inet_proto
  */
-struct proto {
+/*
+proto结构体在传输协议层表示套接字的操作接口。proto_ops中的函数会调用到proto中的函数，从而完成传输层到网络层执行的关系映射，同时proto会管理其下创建的sock实例。
+*/
+struct proto {//传输层协议实现（内核态网络栈）
 	void			(*close)(struct sock *sk, 
 					long timeout);
 	int			(*connect)(struct sock *sk,
@@ -675,13 +678,13 @@ static inline void __sk_prot_rehash(struct sock *sk)
 struct sock_iocb {
 	struct list_head	list;
 
-	int			flags;
-	int			size;
-	struct socket		*sock;
-	struct sock		*sk;
-	struct scm_cookie	*scm;
-	struct msghdr		*msg, async_msg;
-	struct kiocb		*kiocb;
+	int			flags;//标志位
+	int			size;//缓冲区总长度
+	struct socket		*sock;//指向struct socket结构
+	struct sock		*sk; //指向struct sock结构
+	struct scm_cookie	*scm; //身份地址结构
+	struct msghdr		*msg, async_msg;//消息结构
+	struct kiocb		*kiocb;//IO请求地址
 };
 
 static inline struct sock_iocb *kiocb_to_siocb(struct kiocb *iocb)
@@ -728,15 +731,15 @@ static inline int sk_mem_pages(int amt)
 static inline int sk_has_account(struct sock *sk)
 {
 	/* return true if protocol supports memory accounting */
-	return !!sk->sk_prot->memory_allocated;
+	return !!sk->sk_prot->memory_allocated;//sock的分配内存计数器
 }
 
 static inline int sk_wmem_schedule(struct sock *sk, int size)
 {
-	if (!sk_has_account(sk))
+	if (!sk_has_account(sk))//检查sock内存分配计数
 		return 1;
-	return size <= sk->sk_forward_alloc ||
-		__sk_mem_schedule(sk, size, SK_MEM_SEND);
+	return size <= sk->sk_forward_alloc ||//检查长度是否在可用内存范围
+		__sk_mem_schedule(sk, size, SK_MEM_SEND);//递增可用内存数和分配计数器
 }
 
 static inline int sk_rmem_schedule(struct sock *sk, int size)
@@ -765,9 +768,9 @@ static inline void sk_mem_reclaim_partial(struct sock *sk)
 
 static inline void sk_mem_charge(struct sock *sk, int size)
 {
-	if (!sk_has_account(sk))
+	if (!sk_has_account(sk))//检查sock内存分配计数器
 		return;
-	sk->sk_forward_alloc -= size;
+	sk->sk_forward_alloc -= size;//递减可用内存计数器
 }
 
 static inline void sk_mem_uncharge(struct sock *sk, int size)
@@ -1082,6 +1085,7 @@ extern struct dst_entry *sk_dst_check(struct sock *sk, u32 cookie);
 
 static inline int sk_can_gso(const struct sock *sk)
 {
+	/*对于tcp，在tcp_v4_connect中被设置：sk->sk_gso_type = SKB_GSO_TCPV4*/
 	return net_gso_ok(sk->sk_route_caps, sk->sk_gso_type);
 }
 
@@ -1091,22 +1095,22 @@ static inline int skb_copy_to_page(struct sock *sk, char __user *from,
 				   struct sk_buff *skb, struct page *page,
 				   int off, int copy)
 {
-	if (skb->ip_summed == CHECKSUM_NONE) {
+	if (skb->ip_summed == CHECKSUM_NONE) {//查看检验和标志
 		int err = 0;
 		__wsum csum = csum_and_copy_from_user(from,
 						     page_address(page) + off,
-							    copy, 0, &err);
+							    copy, 0, &err);//复制数据并计算检验和
 		if (err)
 			return err;
-		skb->csum = csum_block_add(skb->csum, csum, skb->len);
-	} else if (copy_from_user(page_address(page) + off, from, copy))
+		skb->csum = csum_block_add(skb->csum, csum, skb->len);//调整校验和
+	} else if (copy_from_user(page_address(page) + off, from, copy))//直接复制数据
 		return -EFAULT;
 
-	skb->len	     += copy;
-	skb->data_len	     += copy;
-	skb->truesize	     += copy;
-	sk->sk_wmem_queued   += copy;
-	sk_mem_charge(sk, copy);
+	skb->len	     += copy;//累加数据块总长度
+	skb->data_len	     += copy;//累加分散数据块长度
+	skb->truesize	     += copy;//累加数据包实际尺寸
+	sk->sk_wmem_queued   += copy;//累加内存计数
+	sk_mem_charge(sk, copy);//递减可用内存计数
 	return 0;
 }
 

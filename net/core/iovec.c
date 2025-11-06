@@ -81,17 +81,17 @@ int verify_iovec(struct msghdr *m, struct iovec *iov, char *address, int mode)
 
 int memcpy_toiovec(struct iovec *iov, unsigned char *kdata, int len)
 {
-	while (len > 0) {
-		if (iov->iov_len) {
-			int copy = min_t(unsigned int, iov->iov_len, len);
-			if (copy_to_user(iov->iov_base, kdata, copy))
+	while (len > 0) {//循环复制
+		if (iov->iov_len) {//如果指定了缓冲区长度(服务器程序指定)
+			int copy = min_t(unsigned int, iov->iov_len, len);//重新确定复制长度
+			if (copy_to_user(iov->iov_base, kdata, copy))//复制数据到缓冲区
 				return -EFAULT;
-			kdata += copy;
-			len -= copy;
-			iov->iov_len -= copy;
-			iov->iov_base += copy;
+			kdata += copy;//调整复制位置
+			len -= copy;//调整指定长度
+			iov->iov_len -= copy;//调整缓冲区长度
+			iov->iov_base += copy;//调整缓冲区存放位置
 		}
-		iov++;
+		iov++;//没有复制完成,使用下一个缓冲区
 	}
 
 	return 0;

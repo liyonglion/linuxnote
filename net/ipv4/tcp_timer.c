@@ -116,43 +116,46 @@ static int tcp_orphan_retries(struct sock *sk, int alive)
 
 static void tcp_mtu_probing(struct inet_connection_sock *icsk, struct sock *sk)
 {
-	/* Black hole detection */
-	if (sysctl_tcp_mtu_probing) {
-		if (!icsk->icsk_mtup.enabled) {
-			icsk->icsk_mtup.enabled = 1;
-			tcp_sync_mss(sk, icsk->icsk_pmtu_cookie);
-		} else {
+	/* Black hole detection
+	有可能因为防火墙等原因，发送方收不到ICMP消息，因此发送方一直发送探测包，却一直没收到回应， 这个就称为black hole
+	sysctl_tcp_mtu_probing=1, 表示默认禁用mtu，只有当检测到black hole的时候，才会开启tcp mtu probe
+	 */
+	if (sysctl_tcp_mtu_probing) { //2=启用， 1表示只有检测到black hole的时候才启用
+		if (!icsk->icsk_mtup.enabled) {//说明 sysctl_tcp_mtu_probing=1，在connect()流程里面tcp_mtu_init()的时候，icsk->icsk_mtup.enabled=0
+			icsk->icsk_mtup.enabled = 1;//检测到black hole，启用tcp mtu probe
+			tcp_sync_mss(sk, icsk->icsk_pmtu_cookie);//更新mss_cache
+		} else {//说明 sysctl_tcp_mtu_probing=2，已经启用tcp mtu probe了
 			struct tcp_sock *tp = tcp_sk(sk);
 			int mss;
-
+			//重新设置了探测下限，通过这样的方法，内核会探测到真实的PMTU，从而保证TCP报文可以顺利发送
 			mss = tcp_mtu_to_mss(sk, icsk->icsk_mtup.search_low) >> 1;
 			mss = min(sysctl_tcp_base_mss, mss);
 			mss = max(mss, 68 - tp->tcp_header_len);
-			icsk->icsk_mtup.search_low = tcp_mss_to_mtu(sk, mss);
-			tcp_sync_mss(sk, icsk->icsk_pmtu_cookie);
+			icsk->icsk_mtup.search_low = tcp_mss_to_mtu(sk, mss);//减下下限，再试
+			tcp_sync_mss(sk, icsk->icsk_pmtu_cookie);//更新mss_cache
 		}
 	}
 }
 
 /* A write timeout has occurred. Process the after effects. */
-static int tcp_write_timeout(struct sock *sk)
+static int tcp_write_timeout(struct sock *sk)//超时重传时被调用
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	int retry_until;
 
-	if ((1 << sk->sk_state) & (TCPF_SYN_SENT | TCPF_SYN_RECV)) {
-		if (icsk->icsk_retransmits)
+	if ((1 << sk->sk_state) & (TCPF_SYN_SENT | TCPF_SYN_RECV)) {//状态为SYN_SENT或SYN_RECV，表示正在握手中
+		if (icsk->icsk_retransmits)//有超时重发次数大于0，表示有重发
 			dst_negative_advice(&sk->sk_dst_cache);
-		retry_until = icsk->icsk_syn_retries ? : sysctl_tcp_syn_retries;
+		retry_until = icsk->icsk_syn_retries ? : sysctl_tcp_syn_retries; //syn最大重试次数
 	} else {
-		if (icsk->icsk_retransmits >= sysctl_tcp_retries1) {
+		if (icsk->icsk_retransmits >= sysctl_tcp_retries1) {//已建立链接出现丢包次数大于sysctl_tcp_retries1(默认为3)
 			/* Black hole detection */
-			tcp_mtu_probing(icsk, sk);
+			tcp_mtu_probing(icsk, sk);//探测是否出现黑洞MTU
 
-			dst_negative_advice(&sk->sk_dst_cache);
+			dst_negative_advice(&sk->sk_dst_cache);//路由项相关操作：删除路由项
 		}
 
-		retry_until = sysctl_tcp_retries2;
+		retry_until = sysctl_tcp_retries2;//最大丢包次数。默认值为15
 		if (sock_flag(sk, SOCK_DEAD)) {
 			const int alive = (icsk->icsk_rto < TCP_RTO_MAX);
 
@@ -163,7 +166,7 @@ static int tcp_write_timeout(struct sock *sk)
 		}
 	}
 
-	if (icsk->icsk_retransmits >= retry_until) {
+	if (icsk->icsk_retransmits >= retry_until) {//超过最大次数，报错
 		/* Has it gone just too far? */
 		tcp_write_err(sk);
 		return 1;

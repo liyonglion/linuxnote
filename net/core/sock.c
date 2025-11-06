@@ -205,10 +205,10 @@ static struct lock_class_key af_callback_keys[AF_MAX];
 #define SK_RMEM_MAX		(_SK_MEM_OVERHEAD * _SK_MEM_PACKETS)
 
 /* Run time adjustable parameters. */
-__u32 sysctl_wmem_max __read_mostly = SK_WMEM_MAX;
-__u32 sysctl_rmem_max __read_mostly = SK_RMEM_MAX;
-__u32 sysctl_wmem_default __read_mostly = SK_WMEM_MAX;
-__u32 sysctl_rmem_default __read_mostly = SK_RMEM_MAX;
+__u32 sysctl_wmem_max __read_mostly = SK_WMEM_MAX;//对应sysctl中net.core.wmem_max = 212992,单位字节
+__u32 sysctl_rmem_max __read_mostly = SK_RMEM_MAX; //对应sysctl中net.core.rmem_max = 212992,单位字节
+__u32 sysctl_wmem_default __read_mostly = SK_WMEM_MAX; //对应sysctl中net.core.wmem_default = 212992，单位字节
+__u32 sysctl_rmem_default __read_mostly = SK_RMEM_MAX; //对应sysctl中net.core.rmem_default = 212992，单位字节
 
 /* Maximal space eaten by iovec or ancilliary data plus some space */
 int sysctl_optmem_max __read_mostly = sizeof(unsigned long)*(2*UIO_MAXIOV+512);
@@ -278,7 +278,7 @@ int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 		err = -ENOMEM;
 		goto out;
 	}
-
+	//套接字的包过滤处理
 	err = sk_filter(sk, skb);
 	if (err)
 		goto out;
@@ -287,7 +287,9 @@ int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 		err = -ENOBUFS;
 		goto out;
 	}
-
+	//设置套接字缓冲区的skb的一些数据
+	//Dev指针置空，sk指针指向当前套接字的结构sk
+	//destructor指针置为缓冲区释放时所执行的函数
 	skb->dev = NULL;
 	skb_set_owner_r(skb, sk);
 
@@ -297,9 +299,9 @@ int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	 * from the queue.
 	 */
 	skb_len = skb->len;
-
+	//插入套接字接收队列sk->sk_receive_queue的尾部
 	skb_queue_tail(&sk->sk_receive_queue, skb);
-
+	//通知被阻塞的操作，套接字接收队列中已经有新数据就绪
 	if (!sock_flag(sk, SOCK_DEAD))
 		sk->sk_data_ready(sk, skb_len);
 out:
@@ -1085,12 +1087,12 @@ void sk_setup_caps(struct sock *sk, struct dst_entry *dst)
 	__sk_dst_set(sk, dst);
 	sk->sk_route_caps = dst->dev->features;//兼容的标志取自设备的特性
 	if (sk->sk_route_caps & NETIF_F_GSO)//是否支持GSO分段
-		sk->sk_route_caps |= NETIF_F_GSO_SOFTWARE;//增加分段标识
-	if (sk_can_gso(sk)) {//支持分段类型
+		sk->sk_route_caps |= NETIF_F_GSO_SOFTWARE;//增加GSO分段标识
+	if (sk_can_gso(sk)) {//支持分段类型，对于tcp这里会成立
 		if (dst->header_len) {
 			sk->sk_route_caps &= ~NETIF_F_GSO_MASK;
 		} else {
-			sk->sk_route_caps |= NETIF_F_SG | NETIF_F_HW_CSUM;
+			sk->sk_route_caps |= NETIF_F_SG | NETIF_F_HW_CSUM;//增加SG标志和硬件CSUM
 			sk->sk_gso_max_size = dst->dev->gso_max_size;//记录GSO的分段值
 		}
 	}
@@ -1363,17 +1365,17 @@ static void __lock_sock(struct sock *sk)
 
 static void __release_sock(struct sock *sk)
 {
-	struct sk_buff *skb = sk->sk_backlog.head;
+	struct sk_buff *skb = sk->sk_backlog.head;//获取后备队列的第一个数据包
 
 	do {
-		sk->sk_backlog.head = sk->sk_backlog.tail = NULL;
+		sk->sk_backlog.head = sk->sk_backlog.tail = NULL;//清空后备队列的数据包指针
 		bh_unlock_sock(sk);
 
-		do {
-			struct sk_buff *next = skb->next;
+		do {//循环处理后备队列中的数据包
+			struct sk_buff *next = skb->next;//获取下一个数据包
 
-			skb->next = NULL;
-			sk->sk_backlog_rcv(sk, skb);
+			skb->next = NULL;//数据包脱链
+			sk->sk_backlog_rcv(sk, skb);//处理后备队列的数据包。tcp_v4_do_rcv()
 
 			/*
 			 * We are in process context here with softirqs
@@ -1381,9 +1383,9 @@ static void __release_sock(struct sock *sk)
 			 * This is safe to do because we've taken the backlog
 			 * queue private:
 			 */
-			cond_resched_softirq();
+			cond_resched_softirq();//抢占式进程调度
 
-			skb = next;
+			skb = next;//下一个数据包
 		} while (skb != NULL);
 
 		bh_lock_sock(sk);
@@ -1400,16 +1402,21 @@ static void __release_sock(struct sock *sk)
  * We check receive queue before schedule() only as optimization;
  * it is very likely that release_sock() added new data.
  */
+/*
+在这个函数中先是为服务器程序进程建立一个等待队列头结构,然后链入到sock结构的等待队列,进入定时睡眠。
+前面看到tcp_rcv_established()函数在预处理时,如果无法复制数据,则调用 sock_def_readable()函数唤醒服务器程序进程,让它从 sk_wait_data()返回到
+ tcp.recvmsg()函数继续往下执行。
+*/
 int sk_wait_data(struct sock *sk, long *timeo)
 {
 	int rc;
-	DEFINE_WAIT(wait);
-
+	DEFINE_WAIT(wait);//声明当前进程的等待队列头
+	//将当前进程的等待队列头链入sk_sleep等待队列中,设置为可中断睡眠
 	prepare_to_wait(sk->sk_sleep, &wait, TASK_INTERRUPTIBLE);
-	set_bit(SOCK_ASYNC_WAITDATA, &sk->sk_socket->flags);
-	rc = sk_wait_event(sk, timeo, !skb_queue_empty(&sk->sk_receive_queue));
-	clear_bit(SOCK_ASYNC_WAITDATA, &sk->sk_socket->flags);
-	finish_wait(sk->sk_sleep, &wait);
+	set_bit(SOCK_ASYNC_WAITDATA, &sk->sk_socket->flags);//设置等待数据标志
+	rc = sk_wait_event(sk, timeo, !skb_queue_empty(&sk->sk_receive_queue));//睡眠等待接收队列有数据到来
+	clear_bit(SOCK_ASYNC_WAITDATA, &sk->sk_socket->flags);//清除等待数据标志
+	finish_wait(sk->sk_sleep, &wait);//将当前进程的等待队列头从队列中脱链,恢复运行
 	return rc;
 }
 
@@ -1693,22 +1700,22 @@ EXPORT_SYMBOL(sk_stop_timer);
 
 void sock_init_data(struct socket *sock, struct sock *sk)
 {
-	skb_queue_head_init(&sk->sk_receive_queue);
-	skb_queue_head_init(&sk->sk_write_queue);
-	skb_queue_head_init(&sk->sk_error_queue);
+	skb_queue_head_init(&sk->sk_receive_queue);//初始化接收队列
+	skb_queue_head_init(&sk->sk_write_queue);//初始化写队列
+	skb_queue_head_init(&sk->sk_error_queue);//初始化错误队列
 #ifdef CONFIG_NET_DMA
 	skb_queue_head_init(&sk->sk_async_wait_queue);
 #endif
 
-	sk->sk_send_head	=	NULL;
+	sk->sk_send_head	=	NULL;//初始化发包队列头部。用于紧急数据发送
 
 	init_timer(&sk->sk_timer);
 
 	sk->sk_allocation	=	GFP_KERNEL;
-	sk->sk_rcvbuf		=	sysctl_rmem_default;
-	sk->sk_sndbuf		=	sysctl_wmem_default;
-	sk->sk_state		=	TCP_CLOSE;
-	sk->sk_socket		=	sock;
+	sk->sk_rcvbuf		=	sysctl_rmem_default;//初始化接收缓冲区大小,sysctl_rmem_default是由net.core.rmem_default初始化。这里是对所有的协议生效，如果是tcp，会在tcp_v4_init_sock()函数中重新赋值为具体协议的值，例如：net.ipv4.tcp_rmem = 4096        16384   4194304
+	sk->sk_sndbuf		=	sysctl_wmem_default;//初始化发送缓冲区大小,sysctl_wmem_default是由net.core.wmem_default初始化。这里是对所有的协议生效，如果是tcp，会在tcp_v4_init_sock()函数中重新赋值为具体协议的值
+	sk->sk_state		=	TCP_CLOSE; //创建的时候，sk的状态必须为TCP_CLOSE状态
+	sk->sk_socket		=	sock;//关联到socket
 
 	sock_set_flag(sk, SOCK_ZAPPED);
 
@@ -1772,12 +1779,12 @@ void release_sock(struct sock *sk)
 	 */
 	mutex_release(&sk->sk_lock.dep_map, 1, _RET_IP_);
 
-	spin_lock_bh(&sk->sk_lock.slock);
-	if (sk->sk_backlog.tail)
+	spin_lock_bh(&sk->sk_lock.slock);//自旋锁
+	if (sk->sk_backlog.tail)//后备队列有数据
 		__release_sock(sk);
-	sk->sk_lock.owned = 0;
-	if (waitqueue_active(&sk->sk_lock.wq))
-		wake_up(&sk->sk_lock.wq);
+	sk->sk_lock.owned = 0;//释放锁
+	if (waitqueue_active(&sk->sk_lock.wq))//检查 sock锁的等待进程
+		wake_up(&sk->sk_lock.wq);//唤醒等待进程
 	spin_unlock_bh(&sk->sk_lock.slock);
 }
 EXPORT_SYMBOL(release_sock);
@@ -1856,14 +1863,14 @@ EXPORT_SYMBOL(compat_sock_common_getsockopt);
 int sock_common_recvmsg(struct kiocb *iocb, struct socket *sock,
 			struct msghdr *msg, size_t size, int flags)
 {
-	struct sock *sk = sock->sk;
+	struct sock *sk = sock->sk;//获取sock结构
 	int addr_len = 0;
 	int err;
 
 	err = sk->sk_prot->recvmsg(iocb, sk, msg, size, flags & MSG_DONTWAIT,
-				   flags & ~MSG_DONTWAIT, &addr_len);
+				   flags & ~MSG_DONTWAIT, &addr_len);//调用协议结构的接收函数。tcp_recvmsg()
 	if (err >= 0)
-		msg->msg_namelen = addr_len;
+		msg->msg_namelen = addr_len;//socket的地址长度
 	return err;
 }
 
@@ -1877,7 +1884,7 @@ int sock_common_setsockopt(struct socket *sock, int level, int optname,
 {
 	struct sock *sk = sock->sk;
 
-	return sk->sk_prot->setsockopt(sk, level, optname, optval, optlen);
+	return sk->sk_prot->setsockopt(sk, level, optname, optval, optlen);//对于tcp：tcp_setsockopt()
 }
 
 EXPORT_SYMBOL(sock_common_setsockopt);
@@ -2045,7 +2052,7 @@ int proto_register(struct proto *prot, int alloc_slab)
 
 	if (alloc_slab) {
 		prot->slab = kmem_cache_create(prot->name, prot->obj_size, 0,
-					       SLAB_HWCACHE_ALIGN, NULL);
+					       SLAB_HWCACHE_ALIGN, NULL);//用于申请struct tcp_sock结构的内存池
 
 		if (prot->slab == NULL) {
 			printk(KERN_CRIT "%s: Can't create sock SLAB cache!\n",
@@ -2072,7 +2079,7 @@ int proto_register(struct proto *prot, int alloc_slab)
 			}
 		}
 
-		if (prot->twsk_prot != NULL) {
+		if (prot->twsk_prot != NULL) {//申请timewait状态的结构体
 			static const char mask[] = "tw_sock_%s";
 
 			timewait_sock_slab_name = kmalloc(strlen(prot->name) + sizeof(mask) - 1, GFP_KERNEL);
@@ -2092,7 +2099,7 @@ int proto_register(struct proto *prot, int alloc_slab)
 	}
 
 	write_lock(&proto_list_lock);
-	list_add(&prot->node, &proto_list);
+	list_add(&prot->node, &proto_list);//挂入到proto_list链表中
 	assign_proto_idx(prot);
 	write_unlock(&proto_list_lock);
 	return 0;

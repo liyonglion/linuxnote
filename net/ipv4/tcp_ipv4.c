@@ -152,13 +152,13 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 	__be32 daddr, nexthop;
 	int tmp;
 	int err;
-
+	//检验长度是否合法
 	if (addr_len < sizeof(struct sockaddr_in))
 		return -EINVAL;
-
+	//判断协议族是否INET
 	if (usin->sin_family != AF_INET)
 		return -EAFNOSUPPORT;
-
+	//初始化目标地址和吓一跳地址
 	nexthop = daddr = usin->sin_addr.s_addr;//用于获取路由缓存
 	if (inet->opt && inet->opt->srr) {//是否设置了IP选项结构，并指定了源路由
 		if (!daddr)
@@ -187,7 +187,7 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 	if (!inet->saddr)//源地址为空，使用路由缓存的源地址
 		inet->saddr = rt->rt_src;
 	inet->rcv_saddr = inet->saddr;//接收地址和源地址相同
-	//接受过但现在地址已经改变，需要复位
+	//接收过但现在地址已经改变，需要复位
 	if (tp->rx_opt.ts_recent_stamp && inet->daddr != daddr) {
 		/* Reset inherited state */
 		tp->rx_opt.ts_recent	   = 0;
@@ -196,7 +196,7 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 	}
 
 	if (tcp_death_row.sysctl_tw_recycle &&//用户打开了tcp_tw_recycle
-	    !tp->rx_opt.ts_recent_stamp && rt->rt_dst == daddr) {//使能了tcp_Timestamp。没有设置ip srr。接受过切地址没有改变
+	    !tp->rx_opt.ts_recent_stamp && rt->rt_dst == daddr) {//使能了tcp_Timestamp。没有设置ip srr。接收过且地址没有改变
 		struct inet_peer *peer = rt_get_peer(rt);//获取对方信息
 		/*
 		 * VJ's idea. We save last timestamp seen from
@@ -214,11 +214,11 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 	inet->dport = usin->sin_port;//记录指定的目标端口号
 	inet->daddr = daddr;//记录路由表的目的地址
 
-	inet_csk(sk)->icsk_ext_hdr_len = 0;
-	if (inet->opt)
-		inet_csk(sk)->icsk_ext_hdr_len = inet->opt->optlen;//记录IP选项规定长度
+	inet_csk(sk)->icsk_ext_hdr_len = 0;//初始化IP选项头为0
+	if (inet->opt)//如果用户通过setsockopt设置了IP选项，则记录IP选项头长度
+		inet_csk(sk)->icsk_ext_hdr_len = inet->opt->optlen;//记录IP选项长度
 	//初始化mss 为最小值536
-	tp->rx_opt.mss_clamp = 536;
+	tp->rx_opt.mss_clamp = 536;//主动链接方会把mss为536，在收到对端syn+ack后，会重置该值
 
 	/* Socket identity is still unknown (sport may be zero).
 	 * However we set state to SYN-SENT and not releasing socket
@@ -226,7 +226,7 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 	 * complete initialization after this.
 	 */
 	tcp_set_state(sk, TCP_SYN_SENT);//将sk状态置为SYN-SENT
-	err = inet_hash_connect(&tcp_death_row, sk);//检查端口是否可用
+	err = inet_hash_connect(&tcp_death_row, sk);//分配端口，并记录在TCP的哈希表中
 	if (err)
 		goto failure;
 
@@ -236,7 +236,8 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 		goto failure;
 
 	/* OK, now commit destination to socket.  */
-	sk->sk_gso_type = SKB_GSO_TCPV4;//是Generic Segmentation Offload 的缩写，意思是通用分段值，它的策略是尽可能向后推迟分段,想时间是在网卡驱动里分段,在网卡驱动里把大包(super-packet)拆分成 SG list 或者先将一块分配好的内存重组分段，再交给网卡驱动。
+	//设置GSO类型为TCPV4，该类型值会体现在每一个skb中，底层在分段时需要根据该类型区分L4协议是哪个，以做不同的处理
+	sk->sk_gso_type = SKB_GSO_TCPV4;//是Generic Segmentation Offload 的缩写，意思是通用分段值，它的策略是尽可能向后推迟分段,在将数据递交给网络设备的入口处由软件进行分段（见dev_queue_xmit()）,在网卡驱动里把大包(super-packet)拆分成 SG list 再交给网卡驱动。
 	sk_setup_caps(sk, &rt->u.dst);//设置sk的capability，具体来说设置GSO
 
 	if (!tp->write_seq)
@@ -1577,7 +1578,7 @@ int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
 	}
 
 	TCP_CHECK_TIMER(sk);//空语句
-	//处理其他状态下的包
+	//除了ESTABLISHED和TIME_WAIT状态，调用tcp_rcv_state_process接收数据，处理状态转换
 	if (tcp_rcv_state_process(sk, skb, tcp_hdr(skb), skb->len)) {
 		rsk = sk;
 		goto reset;
@@ -1603,6 +1604,12 @@ csum_err://校验和错误处理
 
 /*
  *	From tcp_input.c
+1. 如果被用户进程锁定，那么处于情形一，此时由于互斥，没得选，为了能快速结束软中断处理，将数据包放入到backlog队列中，这类数据包的真正处理是在用户进程释放TCB时进行的；
+2. 如果没有被进程锁定，那么首先尝试将数据包放入prequeue队列，原因还是为了尽快让软中断结束，这种数据包的处理是在用户进程读数据过程中处理的；
+3. 如果没有被进程锁定，prequeue队列也没有接受该数据包（出于性能考虑，比如prequeue队列不能无限制增大），那么没有更好的办法了，必须在软中断中对数据包进行处理，处理完毕后将数据包加入到receive队列中。
+
+总结如下：
+放入receive队列的数据包都是已经被TCP处理过的数据包，比如校验、回ACK等动作都已经完成了，这些数据包等待用户空间程序读即可；相反，放入backlog队列和prequeue队列的数据包都还需要TCP处理，实际上，这些数据包也都是在合适的时机通过tcp_v4_do_rcv()处理的；
  */
 
 int tcp_v4_rcv(struct sk_buff *skb)
@@ -1617,8 +1624,11 @@ int tcp_v4_rcv(struct sk_buff *skb)
 
 	/* Count it even if it's bad */
 	TCP_INC_STATS_BH(TCP_MIB_INSEGS);//增加tcp_statistics中INSEGS计数。/proc/net/snmp
-
-	if (!pskb_may_pull(skb, sizeof(struct tcphdr)))//检查调整数据包的TCP头部
+	
+	//下面主要是对TCP段的长度进行校验。注意pskb_may_pull()除了校验，还有一个额外的功能，
+	//如果一个TCP段在传输过程中被网络层分片，那么在目的端的网络层会重新组包，这会导致传给
+	//TCP的skb的分片结构中包含多个skb，这种情况下，该函数会将分片结构重组到线性数据区
+	if (!pskb_may_pull(skb, sizeof(struct tcphdr)))//检查调整数据包的TCP头部，保证skb的线性区域至少有20个字节数据
 		goto discard_it;
 	//获取tcp头部
 	th = tcp_hdr(skb);
@@ -1642,7 +1652,7 @@ int tcp_v4_rcv(struct sk_buff *skb)
 	//将TCP头中重要信息保存到TCP_SKB_CB中
 	TCP_SKB_CB(skb)->seq = ntohl(th->seq);
 	TCP_SKB_CB(skb)->end_seq = (TCP_SKB_CB(skb)->seq + th->syn + th->fin +
-				    skb->len - th->doff * 4);//FIXME: 这里的th->doff*4表示的选项头大小？
+				    skb->len - th->doff * 4);//FIXME: 这里的th->doff*4表示的选项头大小？因为doff表示的是占用多少个4字节。
 	TCP_SKB_CB(skb)->ack_seq = ntohl(th->ack_seq);
 	TCP_SKB_CB(skb)->when	 = 0;
 	//FIXME: 为什么这里保存的是tos值？
@@ -1670,7 +1680,9 @@ process:
 
 	bh_lock_sock_nested(sk);
 	ret = 0;
-	//除了time_wait状态的sk，都要调用tcp_v4_do_rcv()函数
+	  //如果当前TCB没有被进程上下文锁定，首先尝试将数据包放入prequeue队列，
+	//如果prequeue队列没有处理，再将其处理后放入receive队列。如果TCB已
+	//经被进程上下文锁定，那么直接将数据包放入backlog队列
 	if (!sock_owned_by_user(sk)) {//检查sock结构是否还可用
 #ifdef CONFIG_NET_DMA
 		struct tcp_sock *tp = tcp_sk(sk);
@@ -1680,12 +1692,12 @@ process:
 			ret = tcp_v4_do_rcv(sk, skb);
 		else
 #endif
-		{
+		{	//prequeue没有接收该数据包时返回0，那么交由tcp_v4_do_rcv()处理
 			if (!tcp_prequeue(sk, skb))//链入预处理队列
 			ret = tcp_v4_do_rcv(sk, skb);//不链入预处理队列，直接处理数据包
 		}
 	} else
-		sk_add_backlog(sk, skb);//如果sock结构目前不可用，就将数据包链入后备队列
+		sk_add_backlog(sk, skb);//TCB被用户进程锁定，直接将数据包放入backlog队列
 	bh_unlock_sock(sk);//解锁
 
 	sock_put(sk);//递减使用计数
@@ -1806,18 +1818,18 @@ int tcp_v4_tw_remember_stamp(struct inet_timewait_sock *tw)
 }
 
 struct inet_connection_sock_af_ops ipv4_specific = {
-	.queue_xmit	   = ip_queue_xmit,
-	.send_check	   = tcp_v4_send_check,
-	.rebuild_header	   = inet_sk_rebuild_header,
-	.conn_request	   = tcp_v4_conn_request,
-	.syn_recv_sock	   = tcp_v4_syn_recv_sock,
-	.remember_stamp	   = tcp_v4_remember_stamp,
-	.net_header_len	   = sizeof(struct iphdr),
-	.setsockopt	   = ip_setsockopt,
-	.getsockopt	   = ip_getsockopt,
-	.addr2sockaddr	   = inet_csk_addr2sockaddr,
-	.sockaddr_len	   = sizeof(struct sockaddr_in),
-	.bind_conflict	   = inet_csk_bind_conflict,
+	.queue_xmit	   = ip_queue_xmit, //发送函数指针
+	.send_check	   = tcp_v4_send_check, //计算校验和函数指针
+	.rebuild_header	   = inet_sk_rebuild_header, //重构TCP头部函数指针
+	.conn_request	   = tcp_v4_conn_request, //连接请求函数指针
+	.syn_recv_sock	   = tcp_v4_syn_recv_sock, //TCP连接请求处理函数指针
+	.remember_stamp	   = tcp_v4_remember_stamp, //保存时间戳函数指针
+	.net_header_len	   = sizeof(struct iphdr), //IP头部长度
+	.setsockopt	   = ip_setsockopt, //设置套接字选项函数指针
+	.getsockopt	   = ip_getsockopt, //获取套接字选项函数指针
+	.addr2sockaddr	   = inet_csk_addr2sockaddr, //将inet_sock结构转换为sockaddr结构
+	.sockaddr_len	   = sizeof(struct sockaddr_in), //sockaddr结构长度
+	.bind_conflict	   = inet_csk_bind_conflict, //绑定冲突处理函数指针
 #ifdef CONFIG_COMPAT
 	.compat_setsockopt = compat_ip_setsockopt,
 	.compat_getsockopt = compat_ip_getsockopt,
@@ -1840,11 +1852,11 @@ static int tcp_v4_init_sock(struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	struct tcp_sock *tp = tcp_sk(sk);
-
-	skb_queue_head_init(&tp->out_of_order_queue);
-	tcp_init_xmit_timers(sk);
+	//初始化TCP队列 out_of_order_queue
+	skb_queue_head_init(&tp->out_of_order_queue);//初始化乱序队列
+	tcp_init_xmit_timers(sk);//初始化传输时用到定时器
 	tcp_prequeue_init(tp);
-
+	//初始化超时时间
 	icsk->icsk_rto = TCP_TIMEOUT_INIT;
 	tp->mdev = TCP_TIMEOUT_INIT;
 
@@ -1853,17 +1865,20 @@ static int tcp_v4_init_sock(struct sock *sk)
 	 * algorithms that we must have the following bandaid to talk
 	 * efficiently to them.  -DaveM
 	 */
-	tp->snd_cwnd = 2;
+	tp->snd_cwnd = 2;//发送拥塞窗口初始值为2个MSS
 
 	/* See draft-stevens-tcpca-spec-01 for discussion of the
 	 * initialization of these values.
 	 */
-	tp->snd_ssthresh = 0x7fffffff;	/* Infinity */
-	tp->snd_cwnd_clamp = ~0;
-	tp->mss_cache = 536;
-
-	tp->reordering = sysctl_tcp_reordering;
-	icsk->icsk_ca_ops = &tcp_init_congestion_ops;
+	tp->snd_ssthresh = 0x7fffffff;	/* Infinity */ //拥塞窗口阈值
+	tp->snd_cwnd_clamp = ~0;//不允许 snd_cwnd 超过的值。默认为全ff
+	tp->mss_cache = 536;//初始化mss初始值为536，后面会在tcp_sync_mss()修改
+	/*
+	sysctl_tcp_reordering在TCP假设丢包并进入慢启动的情况下，TCP包流中可以重新排序的最大数据包。不建议更改这个数字。这是一个数据包重排序检测指标，
+	旨在最大限度地减少由连接上的数据包重排序引起的不必要的退回和重传。
+	*/
+	tp->reordering = sysctl_tcp_reordering;//先忽略
+	icsk->icsk_ca_ops = &tcp_init_congestion_ops;//初始化拥塞控制算法
 
 	sk->sk_state = TCP_CLOSE;
 
@@ -1876,8 +1891,8 @@ static int tcp_v4_init_sock(struct sock *sk)
 	tp->af_specific = &tcp_sock_ipv4_specific;
 #endif
 
-	sk->sk_sndbuf = sysctl_tcp_wmem[1];
-	sk->sk_rcvbuf = sysctl_tcp_rmem[1];
+	sk->sk_sndbuf = sysctl_tcp_wmem[1];//net.ipv4.tcp_wmem = 4096        16384   4194304，这里赋值的是16384。
+	sk->sk_rcvbuf = sysctl_tcp_rmem[1];//net.ipv4.tcp_rmem = 4096        16384   4194304，这里赋值的是16384。
 	//TCP socket引用计数
 	atomic_inc(&tcp_sockets_allocated);
 

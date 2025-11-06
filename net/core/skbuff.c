@@ -1901,20 +1901,20 @@ static inline void skb_split_inside_header(struct sk_buff *skb,
 					   const u32 len, const int pos)
 {
 	int i;
-
+	//将原数据包的基本数据块多余部分复制到新数据包中
 	skb_copy_from_linear_data_offset(skb, len, skb_put(skb1, pos - len),
 					 pos - len);
 	/* And move data appendix as is. */
 	for (i = 0; i < skb_shinfo(skb)->nr_frags; i++)
-		skb_shinfo(skb1)->frags[i] = skb_shinfo(skb)->frags[i];
+		skb_shinfo(skb1)->frags[i] = skb_shinfo(skb)->frags[i];//新数据包依次复制原数据包的分段数据结构,复制了全部分散数据块的信息
 
-	skb_shinfo(skb1)->nr_frags = skb_shinfo(skb)->nr_frags;
-	skb_shinfo(skb)->nr_frags  = 0;
-	skb1->data_len		   = skb->data_len;
-	skb1->len		   += skb1->data_len;
-	skb->data_len		   = 0;
-	skb->len		   = len;
-	skb_set_tail_pointer(skb, len);
+	skb_shinfo(skb1)->nr_frags = skb_shinfo(skb)->nr_frags;//记录原数据包的分散数据块总数
+	skb_shinfo(skb)->nr_frags  = 0;//原数据包的分散数据块总数清零
+	skb1->data_len		   = skb->data_len;//记录原数据包的分散数据块总长度
+	skb1->len		   += skb1->data_len;//调整新数据包的数据块总长度
+	skb->data_len		   = 0;//原数据包的分散数据块总长度清零
+	skb->len		   = len;//原数据包的长度调整为指定长度
+	skb_set_tail_pointer(skb, len);//记录原数据包基本数据块的结束地址
 }
 
 static inline void skb_split_no_header(struct sk_buff *skb,
@@ -1922,20 +1922,20 @@ static inline void skb_split_no_header(struct sk_buff *skb,
 				       const u32 len, int pos)
 {
 	int i, k = 0;
-	const int nfrags = skb_shinfo(skb)->nr_frags;
+	const int nfrags = skb_shinfo(skb)->nr_frags;//获取原数据包的分散数据块总数
 
-	skb_shinfo(skb)->nr_frags = 0;
-	skb1->len		  = skb1->data_len = skb->len - len;
-	skb->len		  = len;
-	skb->data_len		  = len - pos;
+	skb_shinfo(skb)->nr_frags = 0;//清零原数据包的分散数据块总数
+	skb1->len		  = skb1->data_len = skb->len - len;//计算全部数据块的超出长度,作为新数据包的数据块总长度和分散数据块总长度
+	skb->len		  = len;//将原数据包的数据块总长度设为指定长度
+	skb->data_len		  = len - pos;//计算调整后分散数据块的总长度
 
-	for (i = 0; i < nfrags; i++) {
-		int size = skb_shinfo(skb)->frags[i].size;
+	for (i = 0; i < nfrags; i++) {//循环每一个分散数据包结构
+		int size = skb_shinfo(skb)->frags[i].size;//获取分散数据块的长度
 
 		if (pos + size > len) {
-			skb_shinfo(skb1)->frags[k] = skb_shinfo(skb)->frags[i];
+			skb_shinfo(skb1)->frags[k] = skb_shinfo(skb)->frags[i];//复制这个分散数据结构到新数据包中
 
-			if (pos < len) {
+			if (pos < len) {//如果基本数据块小于指定长度,则将分散数据块划分成两块差值以上部分作为新数据包的分散数据块,差值以内作为原数据包的分散数据块
 				/* Split frag.
 				 * We have two variants in this case:
 				 * 1. Move all the frag to the second
@@ -1944,18 +1944,18 @@ static inline void skb_split_no_header(struct sk_buff *skb,
 				 *    where splitting is expensive.
 				 * 2. Split is accurately. We make this.
 				 */
-				get_page(skb_shinfo(skb)->frags[i].page);
-				skb_shinfo(skb1)->frags[0].page_offset += len - pos;
-				skb_shinfo(skb1)->frags[0].size -= len - pos;
-				skb_shinfo(skb)->frags[i].size	= len - pos;
-				skb_shinfo(skb)->nr_frags++;
+				get_page(skb_shinfo(skb)->frags[i].page);//递增所在内存页面的计数
+				skb_shinfo(skb1)->frags[0].page_offset += len - pos;//对于同一个内存页面,差值以上的部分作为新数据包的第一个分散数据块
+				skb_shinfo(skb1)->frags[0].size -= len - pos;//新数据包的第一个分散数据块，它的长度对应差值减少
+				skb_shinfo(skb)->frags[i].size	= len - pos;//对于同一个内存页面,差值以内的部分作为原数据包的分散数据块
+				skb_shinfo(skb)->nr_frags++;//递增原数据包的分散数据块总数
 			}
-			k++;
-		} else
-			skb_shinfo(skb)->nr_frags++;
-		pos += size;
+			k++;//索引值递增
+		} else //如果此时数据块的长度<=指定长度
+			skb_shinfo(skb)->nr_frags++;//递增原数据包的分散数据块总数
+		pos += size;//累加分散数据块的长度,进人下一次循环
 	}
-	skb_shinfo(skb1)->nr_frags = k;
+	skb_shinfo(skb1)->nr_frags = k;//新数据包记录分散数据块总数
 }
 
 /**
@@ -1966,11 +1966,11 @@ static inline void skb_split_no_header(struct sk_buff *skb,
  */
 void skb_split(struct sk_buff *skb, struct sk_buff *skb1, const u32 len)
 {
-	int pos = skb_headlen(skb);
-
+	int pos = skb_headlen(skb);//计算基本数据块的长度
+	/*如果基本数据块长度大于指定长度,就分隔基本数据块、转嫁分散数据块到新数据包*/
 	if (len < pos)	/* Split line is inside header. */
 		skb_split_inside_header(skb, skb1, len, pos);
-	else		/* Second chunk has no header, nothing to copy. */
+	else		/* Second chunk has no header, nothing to copy. 如果指定长度大于基本数据块,就将分散数据块转嫁、分隔到新数据包*/
 		skb_split_no_header(skb, skb1, len, pos);
 }
 

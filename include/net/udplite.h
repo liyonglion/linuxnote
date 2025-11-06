@@ -15,6 +15,12 @@ extern struct hlist_head 	udplite_hash[UDP_HTABLE_SIZE];
 
 /*
  *	Checksum computation is all in software, hence simpler getfrag.
+from    void *   用户空间数据源（通常为 struct iov_iter *）。
+to      char *   目标缓冲区（SKB 的数据区）。
+offset  int      数据在用户缓冲区中的偏移量（字节）。
+len     int      当前需要拷贝的数据长度。
+odd     int      奇偶校验标志（用于校验和计算）。
+skb     struct sk_buff * 关联的 SKB，存储协议头和数据。
  */
 static __inline__ int udplite_getfrag(void *from, char *to, int  offset,
 				      int len, int odd, struct sk_buff *skb)

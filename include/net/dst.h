@@ -58,8 +58,8 @@ struct dst_entry
 #define DST_NOHASH		8
 	unsigned long		expires;/*表示该表项过期的时间戳*/
 
-	unsigned short		header_len;	/* more space at head required */
-	unsigned short		trailer_len;	/* space to reserve at tail */
+	unsigned short		header_len;	/* more space at head required 额外协议头部长度，通过路由子系统根据网络配置(如IP选项、隧道封装等)计算得出。例如： IP选项(IPOPT_TIMESTAMP)、IPSec头(AH/ESP)、GRE头等 */
+	unsigned short		trailer_len;	/* space to reserve at tail尾部长度通常用于额外的协议尾部信息（如用于IPsec等） */
 
 	unsigned int		rate_tokens;
 	unsigned long		rate_last;	/* rate limiting for ICMP */

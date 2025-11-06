@@ -121,7 +121,7 @@ struct socket {
 	struct fasync_struct	*fasync_list;//socket异步唤醒队列
 	struct file		*file; //socket关联的文件指针
 	struct sock		*sk; //代表具体协议类型。socket是BSD的抽象，sock是TCP层的抽象
-	wait_queue_head_t	wait; //等待队列
+	wait_queue_head_t	wait; //等待队列，会在sock_init_data()中赋值给sk->sk_wait
 	short			type; //socket类型。SOCKET_STREAM、SOCKET_DGRAM、SOCKET_RAW、SOCKET_RDM、SOCKET_SEQPACKET、SOCKET_DCCP、SOCKET_PACKET等
 };
 
@@ -132,7 +132,7 @@ struct sockaddr;
 struct msghdr;
 struct module;
 
-struct proto_ops {
+struct proto_ops {//Socket 系统调用接口（用户态交互）
 	int		family;
 	struct module	*owner;
 	int		(*release)   (struct socket *sock);

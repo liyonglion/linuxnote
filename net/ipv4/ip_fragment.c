@@ -62,16 +62,16 @@ struct ipfrag_skb_cb
 
 /* Describe an entry in the "incomplete datagrams" queue. */
 struct ipq {
-	struct inet_frag_queue q;
+	struct inet_frag_queue q;//包含INET分段队列头结构
 
-	u32		user;
-	__be32		saddr;
-	__be32		daddr;
-	__be16		id;
-	u8		protocol;
-	int             iif;
-	unsigned int    rid;
-	struct inet_peer *peer;
+	u32		user;//来源标志
+	__be32		saddr;//IP头部的源地址
+	__be32		daddr;//IP头部的目的地址
+	__be16		id;//IP头部的ID
+	u8		protocol;//协议
+	int             iif;//网络入设备
+	unsigned int    rid;//接收计数
+	struct inet_peer *peer;//对端信息
 };
 
 static struct inet_frags ip4_frags;
@@ -103,7 +103,7 @@ static unsigned int ipqhashfn(__be16 id, __be32 saddr, __be32 daddr, u8 prot)
 
 static unsigned int ip4_hashfn(struct inet_frag_queue *q)
 {
-	struct ipq *ipq;
+	struct ipq *ipq;//IP分段队列指针
 
 	ipq = container_of(q, struct ipq, q);
 	return ipqhashfn(ipq->id, ipq->saddr, ipq->daddr, ipq->protocol);
@@ -111,15 +111,15 @@ static unsigned int ip4_hashfn(struct inet_frag_queue *q)
 
 static int ip4_frag_match(struct inet_frag_queue *q, void *a)
 {
-	struct ipq *qp;
-	struct ip4_create_arg *arg = a;
+	struct ipq *qp;//IP分段队列指针
+	struct ip4_create_arg *arg = a;//IPvv4的分段信息指针
 
-	qp = container_of(q, struct ipq, q);
-	return (qp->id == arg->iph->id &&
-			qp->saddr == arg->iph->saddr &&
-			qp->daddr == arg->iph->daddr &&
-			qp->protocol == arg->iph->protocol &&
-			qp->user == arg->user);
+	qp = container_of(q, struct ipq, q);//根据INET分段队列头取得IP分段队列指针
+	return (qp->id == arg->iph->id && //IP头部的ID
+			qp->saddr == arg->iph->saddr && //对比源地址
+			qp->daddr == arg->iph->daddr && //对比目的地址
+			qp->protocol == arg->iph->protocol && //对比协议类型
+			qp->user == arg->user);//对比来源标志
 }
 
 /* Memory Tracking Functions. */
@@ -134,16 +134,16 @@ static __inline__ void frag_kfree_skb(struct netns_frags *nf,
 
 static void ip4_frag_init(struct inet_frag_queue *q, void *a)
 {
-	struct ipq *qp = container_of(q, struct ipq, q);
-	struct ip4_create_arg *arg = a;
+	struct ipq *qp = container_of(q, struct ipq, q);//获取 IP分段队列指针
+	struct ip4_create_arg *arg = a;//IPv4的分段信息指针
 
-	qp->protocol = arg->iph->protocol;
-	qp->id = arg->iph->id;
-	qp->saddr = arg->iph->saddr;
-	qp->daddr = arg->iph->daddr;
-	qp->user = arg->user;
+	qp->protocol = arg->iph->protocol;//记录 IP头部协议
+	qp->id = arg->iph->id; //记录 IP头部的ID
+	qp->saddr = arg->iph->saddr; //记录 IP头部的源地址
+	qp->daddr = arg->iph->daddr; //记录 IP头部的目的地址
+	qp->user = arg->user; //记录来源标志
 	qp->peer = sysctl_ipfrag_max_dist ?
-		inet_getpeer(arg->iph->saddr, 1) : NULL;
+		inet_getpeer(arg->iph->saddr, 1) : NULL;//记录对方信息
 }
 
 static __inline__ void ip4_frag_free(struct inet_frag_queue *q)
@@ -178,9 +178,9 @@ static void ip_evictor(struct net *net)
 {
 	int evicted;
 
-	evicted = inet_frag_evictor(&net->ipv4.frags, &ip4_frags);
-	if (evicted)
-		IP_ADD_STATS_BH(IPSTATS_MIB_REASMFAILS, evicted);
+	evicted = inet_frag_evictor(&net->ipv4.frags, &ip4_frags);//清除分段队列
+	if (evicted)//如果返回清除计数
+		IP_ADD_STATS_BH(IPSTATS_MIB_REASMFAILS, evicted);//递增计数
 }
 
 /*
@@ -223,21 +223,21 @@ out:
  */
 static inline struct ipq *ip_find(struct net *net, struct iphdr *iph, u32 user)
 {
-	struct inet_frag_queue *q;
-	struct ip4_create_arg arg;
+	struct inet_frag_queue *q;//INET 分段队列头
+	struct ip4_create_arg arg;//IPv4分段信息
 	unsigned int hash;
 
-	arg.iph = iph;
-	arg.user = user;
+	arg.iph = iph;//记录IP头部指针
+	arg.user = user;//记录来源标志
 
 	read_lock(&ip4_frags.lock);
-	hash = ipqhashfn(iph->id, iph->saddr, iph->daddr, iph->protocol);
+	hash = ipqhashfn(iph->id, iph->saddr, iph->daddr, iph->protocol);//计算hash值
 
-	q = inet_frag_find(&net->ipv4.frags, &ip4_frags, &arg, hash);
+	q = inet_frag_find(&net->ipv4.frags, &ip4_frags, &arg, hash);//查找或者创建INET分段队列头
 	if (q == NULL)
 		goto out_nomem;
 
-	return container_of(q, struct ipq, q);
+	return container_of(q, struct ipq, q);//返回IP分段结构指针
 
 out_nomem:
 	LIMIT_NETDEBUG(KERN_ERR "ip_frag_create: no memory left !\n");
@@ -745,16 +745,16 @@ static struct pernet_operations ip4_frags_ops = {
 
 void __init ipfrag_init(void)
 {
-	register_pernet_subsys(&ip4_frags_ops);
-	ip4_frags.hashfn = ip4_hashfn;
-	ip4_frags.constructor = ip4_frag_init;
-	ip4_frags.destructor = ip4_frag_free;
-	ip4_frags.skb_free = NULL;
-	ip4_frags.qsize = sizeof(struct ipq);
-	ip4_frags.match = ip4_frag_match;
-	ip4_frags.frag_expire = ip_expire;
-	ip4_frags.secret_interval = 10 * 60 * HZ;
-	inet_frags_init(&ip4_frags);
+	register_pernet_subsys(&ip4_frags_ops);//向内核注册IPv4分段管理函数表
+	ip4_frags.hashfn = ip4_hashfn;//设置计算哈希值函数
+	ip4_frags.constructor = ip4_frag_init;//初始化IP分段队列的构造函数
+	ip4_frags.destructor = ip4_frag_free;//销毁IP分段队列的析构函数
+	ip4_frags.skb_free = NULL;//释放数据包函数为空
+	ip4_frags.qsize = sizeof(struct ipq);//记录队列结构长度
+	ip4_frags.match = ip4_frag_match;//比对IP分段队列
+	ip4_frags.frag_expire = ip_expire;//设置分段队列过期处理函数
+	ip4_frags.secret_interval = 10 * 60 * HZ;//设置间隔时间
+	inet_frags_init(&ip4_frags);//进一步初始化
 }
 
 EXPORT_SYMBOL(ip_defrag);

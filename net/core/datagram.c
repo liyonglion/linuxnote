@@ -264,75 +264,81 @@ EXPORT_SYMBOL(skb_kill_datagram);
  *
  *	Note: the iovec is modified during the copy.
  */
+
+/*
+尽管发送时可以在 TCP层使用tcp_fragment()分段数据包,但是并没有看到 TCP层对数据包的重组,这是因为已经由IP层完成了重组。
+我们在第14章看到了这个重组函数ipdefrag(),这里 TCP层并不知道已经被IP层重组了数据包,它只知道分段数据包都在 frag_list 队列中。
+*/
 int skb_copy_datagram_iovec(const struct sk_buff *skb, int offset,
 			    struct iovec *to, int len)
 {
-	int start = skb_headlen(skb);
-	int i, copy = start - offset;
-
+	int start = skb_headlen(skb);//获得基本数据块的长度
+	int i, copy = start - offset;//计算要复制的长度
+	//复制基本数据块中的数据
 	/* Copy header. */
-	if (copy > 0) {
-		if (copy > len)
-			copy = len;
-		if (memcpy_toiovec(to, skb->data + offset, copy))
+	if (copy > 0) {//如果需要复制基本数据块中的数据
+		if (copy > len)//如果大于指定的长度
+			copy = len;//指定长度做为复制长度
+		if (memcpy_toiovec(to, skb->data + offset, copy))//直接复制数据到缓冲区(服务器程程序提供）
 			goto fault;
-		if ((len -= copy) == 0)
+		if ((len -= copy) == 0)//如果全部复制完毕,返回
 			return 0;
-		offset += copy;
+		offset += copy;//修改偏移位置
 	}
-
+	//无法复制完成,说明有分散数据数据块
+	/*循环复制分散数据块中的数据*/
 	/* Copy paged appendix. Hmm... why does this look so complicated? */
 	for (i = 0; i < skb_shinfo(skb)->nr_frags; i++) {
 		int end;
 
 		BUG_TRAP(start <= offset + len);
 
-		end = start + skb_shinfo(skb)->frags[i].size;
-		if ((copy = end - offset) > 0) {
+		end = start + skb_shinfo(skb)->frags[i].size;//计算结束位置
+		if ((copy = end - offset) > 0) {//如果可以复制
 			int err;
 			u8  *vaddr;
-			skb_frag_t *frag = &skb_shinfo(skb)->frags[i];
-			struct page *page = frag->page;
+			skb_frag_t *frag = &skb_shinfo(skb)->frags[i];//获取分段数据结构
+			struct page *page = frag->page;//获取存放分散数据块的内存页面
 
-			if (copy > len)
-				copy = len;
-			vaddr = kmap(page);
+			if (copy > len)//如果复制长度超过指定长度
+				copy = len;//将指定长度做为复制长度
+			vaddr = kmap(page);//对内存页面建立映射
 			err = memcpy_toiovec(to, vaddr + frag->page_offset +
-					     offset - start, copy);
-			kunmap(page);
+					     offset - start, copy);//直接复制数据到缓冲区(服务器程序提供)
+			kunmap(page);//撤销内存页面的映射
 			if (err)
 				goto fault;
-			if (!(len -= copy))
+			if (!(len -= copy))//如果复制完成,返回
 				return 0;
-			offset += copy;
+			offset += copy;//调整偏移位置
 		}
-		start = end;
+		start = end;//调整后复制下一个分散数据块
 	}
-
-	if (skb_shinfo(skb)->frag_list) {
-		struct sk_buff *list = skb_shinfo(skb)->frag_list;
-
+	//无法复制完成,说明还有分段数据包
+	if (skb_shinfo(skb)->frag_list) {//如果有分段数据包
+		struct sk_buff *list = skb_shinfo(skb)->frag_list;//取得第一个分段数据包
+		//循环复制每一个分段数据块的数据
 		for (; list; list = list->next) {
 			int end;
 
 			BUG_TRAP(start <= offset + len);
 
-			end = start + list->len;
-			if ((copy = end - offset) > 0) {
-				if (copy > len)
-					copy = len;
+			end = start + list->len;//计算结束位置
+			if ((copy = end - offset) > 0) {//如果可以复制
+				if (copy > len)//如果复制长度已经超过指定长度
+					copy = len;//以指定长度做为复制长度
 				if (skb_copy_datagram_iovec(list,
 							    offset - start,
-							    to, copy))
+							    to, copy))//递归调用本函数
 					goto fault;
-				if ((len -= copy) == 0)
+				if ((len -= copy) == 0)//如果复制完成,返回
 					return 0;
-				offset += copy;
+				offset += copy;//调整偏移位置
 			}
-			start = end;
+			start = end;//调整后复制下一个分段数据块
 		}
 	}
-	if (!len)
+	if (!len)//如果指定长度为0,返回
 		return 0;
 
 fault:

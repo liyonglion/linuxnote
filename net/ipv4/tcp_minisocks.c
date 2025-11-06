@@ -38,7 +38,10 @@ int sysctl_tcp_syncookies __read_mostly = SYNC_INIT;
 EXPORT_SYMBOL(sysctl_tcp_syncookies);
 
 int sysctl_tcp_abort_on_overflow __read_mostly;
-
+/*
+struct inet_timewait_death_row是 Linux 内核网络协议栈中用于管理 ​​TCP 连接的 TIME_WAIT 状态​​的关键数据结构。
+它负责高效处理大量短连接的 TIME_WAIT 状态，避免资源耗尽。
+*/
 struct inet_timewait_death_row tcp_death_row = {
 	.sysctl_max_tw_buckets = NR_FILE * 2,
 	.period		= TCP_TIMEWAIT_LEN / INET_TWDR_TWKILL_SLOTS,

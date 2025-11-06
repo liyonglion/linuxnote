@@ -65,22 +65,22 @@ struct inet_hashinfo;
 
 struct inet_timewait_death_row {
 	/* Short-time timewait calendar */
-	int			twcal_hand;
-	unsigned long		twcal_jiffie;
-	struct timer_list	twcal_timer;
-	struct hlist_head	twcal_row[INET_TWDR_RECYCLE_SLOTS];
+	int			twcal_hand; //当前时间轮指针
+	unsigned long		twcal_jiffie; //上次更新时间
+	struct timer_list	twcal_timer; //时间轮定时器
+	struct hlist_head	twcal_row[INET_TWDR_RECYCLE_SLOTS]; //时间轮
 
-	spinlock_t		death_lock;
-	int			tw_count;
-	int			period;
-	u32			thread_slots;
-	struct work_struct	twkill_work;
-	struct timer_list	tw_timer;
-	int			slot;
-	struct hlist_head	cells[INET_TWDR_TWKILL_SLOTS];
-	struct inet_hashinfo 	*hashinfo;
-	int			sysctl_tw_recycle;
-	int			sysctl_max_tw_buckets;
+	spinlock_t		death_lock; // 保护数据结构的自旋锁
+	int			tw_count; //当前 TIME_WAIT socket 数量（原子计数）
+	int			period; // 清理周期（秒）
+	u32			thread_slots; // 工作线程槽位
+	struct work_struct	twkill_work; // 异步清理工作队列
+	struct timer_list	tw_timer; //主清理定时器
+	int			slot; // 当前清理槽位指针
+	struct hlist_head	cells[INET_TWDR_TWKILL_SLOTS]; // 主哈希表
+	struct inet_hashinfo 	*hashinfo; //指向哈希表信息
+	int			sysctl_tw_recycle; //是否启用快速回收
+	int			sysctl_max_tw_buckets; //最大TIME_WAIT连接数量限制
 };
 
 extern void inet_twdr_hangman(unsigned long data);

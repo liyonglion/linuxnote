@@ -64,3 +64,7 @@ ncscope.*
 *.orig
 *~
 \#*#
+GTAGS
+GRTAGS
+GPATH
+compile_commands.json

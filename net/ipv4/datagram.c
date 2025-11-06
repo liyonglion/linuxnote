@@ -29,23 +29,25 @@ int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 	int oif;
 	int err;
 
-
+	//地址长度是否正确
 	if (addr_len < sizeof(*usin))
 		return -EINVAL;
-
+	//判断协议族是否为INET
 	if (usin->sin_family != AF_INET)
 		return -EAFNOSUPPORT;
-
+	//释放sk过去缓冲的路由项
 	sk_dst_reset(sk);
 
 	oif = sk->sk_bound_dev_if;
 	saddr = inet->saddr;
+	//检查是否为广播地址
 	if (ipv4_is_multicast(usin->sin_addr.s_addr)) {
 		if (!oif)
 			oif = inet->mc_index;
 		if (!saddr)
 			saddr = inet->mc_addr;
 	}
+	//查询路由表，返回路由表项信息，保存在rt变量中
 	err = ip_route_connect(&rt, usin->sin_addr.s_addr, saddr,
 			       RT_CONN_FLAGS(sk), oif,
 			       sk->sk_protocol,
@@ -60,15 +62,17 @@ int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 		ip_rt_put(rt);
 		return -EACCES;
 	}
+	//重新设置套接字中的地址信息
 	if (!inet->saddr)
 		inet->saddr = rt->rt_src;	/* Update source address */
 	if (!inet->rcv_saddr)
 		inet->rcv_saddr = rt->rt_src;
 	inet->daddr = rt->rt_dst;
 	inet->dport = usin->sin_port;
+	//设置套接字状态为TCP_ESTABLISHED，表示已经缓存了路由信息
 	sk->sk_state = TCP_ESTABLISHED;
 	inet->id = jiffies;
-
+	// 为套接字设置路由缓存信息
 	sk_dst_set(sk, &rt->u.dst);
 	return(0);
 }

@@ -22,21 +22,21 @@
 #include <linux/socket.h>
 
 struct tcphdr {
-	__be16	source;
-	__be16	dest;
-	__be32	seq;
-	__be32	ack_seq;
+	__be16	source;//16位源端口号
+	__be16	dest;//16位目的端口号
+	__be32	seq;//此次发送的数据在整个报文段中的起始字节数。此序号用来标识从tcp发送端向tcp接受端发送的数据字节流，seq表示在这个报文段中的第一个数据字节。如果将字节流看做在两个应用程序间的单向流动，则tcp用序号对每个字节进行计数。32 bit的无符号数。为了安全起见，它的初始值是一个随机生成的数，它到达2的32次方-1后又从零开始。
+	__be32	ack_seq; //是下一个期望接收的字节，确认序号应当是上次已成功接收的序号+1，只有ack标志为1时确认序号字段才有效。一旦一个连接已经建立了，ack总是=1
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u16	res1:4,
-		doff:4,
-		fin:1,
-		syn:1,
-		rst:1,
-		psh:1,
-		ack:1,
-		urg:1,
-		ece:1,
-		cwr:1;
+	__u16	res1:4, // 保留位
+		doff:4,  //tcp头部长度，指明了在tcp头部中包含了多少个32位的字。由于options域的长度是可变的，所以整个tcp头部的长度也是变化的。4bit可表示最大值15，故15*32=480bit=60字节，所以tcp首部最长60字节。然后，没有任选字段，正常的长度是20字节
+		fin:1, //发端完成发送任务
+		syn:1,//同步序号用来发起一个连接
+		rst:1, //重建连接
+		psh:1, //接收方应该尽快将这个报文段交给应用层
+		ack:1,//一旦一个连接已经建立了，ack总是=1
+		urg:1, //紧急指针有效
+		ece:1, //拥塞控制
+		cwr:1; //拥塞控制
 #elif defined(__BIG_ENDIAN_BITFIELD)
 	__u16	doff:4,
 		res1:4,
@@ -51,9 +51,9 @@ struct tcphdr {
 #else
 #error	"Adjust your <asm/byteorder.h> defines"
 #endif	
-	__be16	window;
-	__sum16	check;
-	__be16	urg_ptr;
+	__be16	window; //窗口大小，单位字节数，指接收端正期望接受的字节，16bit，故窗口大小最大为16bit=1111 1111 1111 1111（二进制）=65535（十进制）字节
+	__sum16	check;//校验和校验的是整个tcp报文段，包括tcp首部和tcp数据，这是一个强制性的字段，一定是由发端计算和存储，并由收端进行验证。
+	__be16	urg_ptr; //紧急指针
 };
 
 /*
@@ -220,8 +220,8 @@ struct tcp_options_received {
 /*	SACKs data	*/
 	u8	eff_sacks;	/* Size of SACK array to send with next packet */
 	u8	num_sacks;	/* Number of SACK blocks		*/
-	u16	user_mss;  	/* mss requested by user in ioctl */
-	u16	mss_clamp;	/* Maximal mss, negotiated at connection setup */
+	u16	user_mss;  	/* mss requested by user in ioctl 用户设置的本端 MSS。用户可以通过 TCP_MAXSEG 这个 socket 选项对这个字段进行设置，这个字段在 rx_opt 中，说明用户设置该字段起到的作用就如同收到了对端通告的 MSS 值。 */
+	u16	mss_clamp;	/* Maximal mss, negotiated at connection setup 连接建立阶段本端计算出的 MSS。它取user_mss和 对端 SYN(SYNACK) 报文通告的 MSS 值中的较小值，如果用户没有设置 user_mss，则就为对端报文中的 MSS 值。我们可以理解为生效 MSS的最大值。*/
 };
 
 struct tcp_request_sock {
@@ -240,12 +240,13 @@ static inline struct tcp_request_sock *tcp_rsk(const struct request_sock *req)
 {
 	return (struct tcp_request_sock *)req;
 }
-
+//tcp_sock(TCP专用，例如拥塞管理、序列号等等)-->inet_connection_sock(连接层)--->inet_sock(IPV4/IPV6基础层，如端口号、IP地址)--->sock(所有协议族公用)继承关系
+//存储 ​​TCP 协议独有的状态和数据​​，如序列号、拥塞控制、滑动窗口等。是内核中 TCP 套接字的核心数据结构，所有 TCP 专属操作均依赖此结构。
 struct tcp_sock {
 	/* inet_connection_sock has to be the first member of tcp_sock */
 	struct inet_connection_sock	inet_conn;
-	u16	tcp_header_len;	/* Bytes of tcp header to send	发送的 tcp 头部字节数	*/
-	u16	xmit_size_goal;	/* Goal for segmenting output packets 分段传送的数据包数量	*/
+	u16	tcp_header_len;	/* Bytes of tcp header to send	发送的 tcp 头部字节数，包括tcp选项头(不包括sack大小)大小	*/
+	u16	xmit_size_goal;	/* Goal for segmenting output packets 分段传送的数据包大小	*/
 
 /*
  *	Header prediction flags
@@ -261,12 +262,20 @@ struct tcp_sock {
  *	See RFC793 and RFC1122. The RFC writes these in capitals.
  根据 REC793标准定义的变量。可以参考 REC793 和 REC1122了解这些内容
  */
+/*
+                 
+				 |<-------------发送窗口(tp->snd_wnd)---->|
+  已发送已确认    |   已发送未确认  |  未发送且在发送窗口内  |  未发送且未在发送窗口内  
+                 ⬆                ⬆               
+				 tp->snd_una 	  tp->snd_nxt
+				 
+*/
  	u32	rcv_nxt;	/* What we want to receive next 下一个要接收的目标	*/
 	u32	copied_seq;	/* Head of yet unread data	代表还没有读取的数据	*/
 	u32	rcv_wup;	/* rcv_nxt on last window update sent rcv_nxt 在最后一次窗口更新时内容	*/
- 	u32	snd_nxt;	/* Next sequence we send	下-个要发送的目标	*/
+ 	u32	snd_nxt;	/* Next sequence we send	下一个要发送的序号，即序号等于snd_nxt的数据还没有发送	*/
 
- 	u32	snd_una;	/* First byte we want an ack for 第一个要 ACK的字节	*/
+ 	u32	snd_una;	//已经发送，但是还没有被确认的最小序号，注意序号等于snd_una的数据已经发送，最想收到的确认号要大于snd_una。但是有一个特殊情况，如果发送的所有数据都已经被确认，那么snd_una将等于下一个要发送的数据，即snd_una代表的数据还没有发送
  	u32	snd_sml;	/* Last byte of the most recently transmitted small packet 最近发送数据包中的尾字节 */
 	u32	rcv_tstamp;	/* timestamp of last received ACK (for keepalives) 最后一次接收到 ACK 的时间 */
 	u32	lsndtime;	/* timestamp of last sent data packet (for restart window) 最后一次发送数据包的时间 */
@@ -274,7 +283,7 @@ struct tcp_sock {
 	/* Data for direct copy to user */
 	struct {
 		struct sk_buff_head	prequeue; //预处理队列
-		struct task_struct	*task; //预处理进程
+		struct task_struct	*task; //预处理进程：用户进程
 		struct iovec		*iov; //用户程序(应用程序)接收数据的缓冲区
 		int			memory; //预处理数据包计数器
 		int			len; //预处理长度
@@ -288,15 +297,15 @@ struct tcp_sock {
 	} ucopy;
 
 	u32	snd_wl1;	/* Sequence for window update	窗口更新的顺序	*/
-	u32	snd_wnd;	/* The window we expect to receive 期望接收的窗口	*/
-	u32	max_window;	/* Maximal window ever seen from peer 对方的最大的窗口	*/
-	u32	mss_cache;	/* Cached effective mss, not including SACKS 有效的 mss缓存，不包括 SACKS */
+	u32	snd_wnd;	/* 发送窗口大小，以字节为单位，来源于输入段首部的窗口字段，即对端接收缓冲区的剩余大小。对snd_wnd的初始化发生在收到SYN+ACK段	*/
+	u32	max_window;	/* 记录到目前为止对端通告过的窗口的最大值，可以代表对端接收缓冲区的最大值	*/
+	u32	mss_cache;	/* Cached effective mss, not including SACKS 生效 MSS。它是这几个字段中最重要的，表示本端 TCP 发包实际的分段大小依据，它的值在连接过程中可能发生变化。无论是主动端还是被动端，在创建tcp_sock时，就会对mss_cache进行初始化为 TCP_MSS_DEFAULT(536)，在tcp_init_sock()中初始化*/
 
 	u32	window_clamp;	/* Maximal window to advertise 对外公布的最大窗口		*/
 	u32	rcv_ssthresh;	/* Current window clamp		当前窗口	*/
 
 	u32	frto_highmark;	/* snd_nxt when RTO occurred 在RTO时的snd_nxt */
-	u8	reordering;	/* Packet reordering metric.	预设的数据包数量	*/
+	u8	reordering;	/* Packet reordering metric.	包最大重排序数量	*/
 	u8	frto_counter;	/* Number of new acks after RTO  RTO 后的 ack 次数*/
 	u8	nonagle;	/* Disable Nagle algorithm?    是否使用Nagle算法         */
 	u8	keepalive_probes; /* num of allowed keep alive probes	*/
@@ -308,7 +317,7 @@ struct tcp_sock {
 	u32	rttvar;		/* smoothed mdev_max			*/
 	u32	rtt_seq;	/* sequence number to update rttvar	*/
 
-	u32	packets_out;	/* Packets which are "in flight" 处于飞行中的数据包数量	*/
+	u32	packets_out;	/* Packets which are "in flight" 发出去数据包总大小。用于计算飞行中的数据包总大小*/
 	u32	retrans_out;	/* Retransmitted packets out	转发的数据包数量	*/
 /*
  *      Options received (usually on last packet, some only on SYN packets).
@@ -320,7 +329,7 @@ struct tcp_sock {
  *	Slow start and congestion control (see also Nagle, and Karn & Partridge)
  */
  	u32	snd_ssthresh;	/* Slow start size threshold	慢起动的起点值	*/
- 	u32	snd_cwnd;	/* Sending congestion window	发送的阻塞窗口	*/
+ 	u32	snd_cwnd;	/* Sending congestion window	发送的阻塞窗口，单位mss	*/
 	u32	snd_cwnd_cnt;	/* Linear increase counter	线性计数器	*/
 	u32	snd_cwnd_clamp; /* Do not allow snd_cwnd to grow above this 不允许 snd_cwnd 超过的值 */
 	u32	snd_cwnd_used;
@@ -329,8 +338,8 @@ struct tcp_sock {
 	struct sk_buff_head	out_of_order_queue; /* Out of order segments go here 超出分段规则的队列 */
 
  	u32	rcv_wnd;	/* Current receiver window	当前接收窗口	*/
-	u32	write_seq;	/* Tail(+1) of data held in tcp send buffer tcp 发送数据的顺序号 */
-	u32	pushed_seq;	/* Last pushed seq, required to talk to windows  最后送出的顺序号，需要通知窗口*/
+	u32	write_seq;	/* 写系统调用一旦成功返回，说明数据一被TCP协议接收，这时就要为每一个数据分配一个序号，write_seq就是下一个要分配的序号，其初始值由secure_tcp_sequence_number()基于算法生成。注意等于write_seq的序号还没有被分配 */
+	u32	pushed_seq;	/* Last pushed seq, required to talk to windows  最后送出的push顺序号，需要通知窗口*/
 
 /*	SACKs data	*/
 	struct tcp_sack_block duplicate_sack[1]; /* D-SACK block */
@@ -355,7 +364,7 @@ struct tcp_sock {
 
 	u32	lost_retrans_low;	/* Sent seq after any rxmit (lowest) */
 
-	u16	advmss;		/* Advertised MSS			*/
+	u16	advmss;		/* Advertised MSS	本端向对端通告的包含option的 MSS 值。举个例子，当网卡 MTU 为 1500 字节时，通信双方通告的 MSS 都应该为 1460 字节，但如果双方都开启了 TCP timestamp 选项(会占用 12 字节)，则advmss的值会是 1448		*/
 	u32	prior_ssthresh; /* ssthresh saved at recovery start	*/
 	u32	lost_out;	/* Lost packets			*/
 	u32	sacked_out;	/* SACK'd packets			*/
@@ -364,13 +373,13 @@ struct tcp_sock {
 
 	u32	retrans_stamp;	/* Timestamp of the last retransmit,
 				 * also used in SYN-SENT to remember stamp of
-				 * the first SYN. 记录发送SYN的时间戳，对于超时重传syn，也需要更新该值 */
+				 * the first SYN. 记录发送SYN的时间戳，对于超时重传syn，也需要更新该值。就是记录发送syn的时间戳*/
 	u32	undo_marker;	/* tracking retrans started here. */
 	int	undo_retrans;	/* number of undoable retransmissions. */
 	u32	urg_seq;	/* Seq of received urgent pointer */
 	u16	urg_data;	/* Saved octet of OOB data and control flags */
 	u8	urg_mode;	/* In urgent mode		*/
-	u8	ecn_flags;	/* ECN status bits.			*/
+	u8	ecn_flags;	/* ECN status bits.	ecn控制位		*/
 	u32	snd_up;		/* Urgent pointer		*/
 
 	u32	total_retrans;	/* Total retransmits for entire connection */

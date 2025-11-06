@@ -20,10 +20,10 @@
 #include <linux/types.h>
 
 struct udphdr {
-	__be16	source;
-	__be16	dest;
-	__be16	len;
-	__sum16	check;
+	__be16	source; //源端口
+	__be16	dest; //目的端口
+	__be16	len; //长度
+	__sum16	check; //校验和
 };
 
 /* UDP socket options */

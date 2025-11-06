@@ -34,6 +34,7 @@ struct tcp_congestion_ops;
 /*
  * Pointers to address related TCP functions
  * (i.e. things that depend on the address family)
+ * ​​抽象不同地址族（IPv4/IPv6）的连接层操作​​的关键数据结构。它实现了​​协议族特定的连接管理操作​​，使 TCP 协议栈能够透明支持 IPv4 和 IPv6。
  */
 struct inet_connection_sock_af_ops {
 	int	    (*queue_xmit)(struct sk_buff *skb, int ipfragok);
@@ -45,7 +46,7 @@ struct inet_connection_sock_af_ops {
 				      struct request_sock *req,
 				      struct dst_entry *dst);
 	int	    (*remember_stamp)(struct sock *sk);
-	u16	    net_header_len;
+	u16	    net_header_len;//网络头部长度
 	u16	    sockaddr_len;
 	int	    (*setsockopt)(struct sock *sk, int level, int optname, 
 				  char __user *optval, int optlen);
@@ -86,22 +87,22 @@ struct inet_connection_sock {//面向连接的套接字.通用传输控制信息
 	/* inet_sock has to be the first member! */
 	struct inet_sock	  icsk_inet; //INET 协议族的sock 结构
 	struct request_sock_queue icsk_accept_queue;//链接管理队列：包括正在握手的、已经完成握手等待accept()的套接字。也就是半连接队列喝全连接队列
-	struct inet_bind_bucket	  *icsk_bind_hash; //sk所在的bhash桶
+	struct inet_bind_bucket	  *icsk_bind_hash; //sk所在的bhash桶,在调用bind加入到bhash桶的时候会赋值
 	unsigned long		  icsk_timeout; //超时
  	struct timer_list	  icsk_retransmit_timer;//没有 ACK 时的重发定时器
  	struct timer_list	  icsk_delack_timer;//确定删除的定时器
 	__u32			  icsk_rto;//重复超时
-	__u32			  icsk_pmtu_cookie;//最新的pMTU
+	__u32			  icsk_pmtu_cookie;//最新的pMTU。默认初始化为536
 	const struct tcp_congestion_ops *icsk_ca_ops;//拥挤情况时的处理函数表
-	const struct inet_connection_sock_af_ops *icsk_af_ops;//AF_INET 指定的函数表
-	unsigned int		  (*icsk_sync_mss)(struct sock *sk, u32 pmtu);
+	const struct inet_connection_sock_af_ops *icsk_af_ops;//AF_INET 指定的函数表：ipv4_specific
+	unsigned int		  (*icsk_sync_mss)(struct sock *sk, u32 pmtu);//同步mss，会修改mss值。在tcp_v4_init_sock()中赋值为tcp_sync_mss()
 	__u8			  icsk_ca_state;//拥挤情况的处理状态
 	__u8			  icsk_retransmits; //重复数量
 	__u8			  icsk_pending; //挂起
 	__u8			  icsk_backoff; //允许连接的数量
 	__u8			  icsk_syn_retries; //重发syn的数量
 	__u8			  icsk_probes_out;//探测到未应答的窗口
-	__u16			  icsk_ext_hdr_len;//网络协议头部的长度
+	__u16			  icsk_ext_hdr_len;//IP选项长度
 	struct {
 		__u8		  pending;	 /* ACK is pending			   */
 		__u8		  quick;	 /* Scheduled number of quick acks	   */
@@ -114,11 +115,11 @@ struct inet_connection_sock {//面向连接的套接字.通用传输控制信息
 		__u16		  rcv_mss;	 /* MSS used for delayed ACK decisions	   */ 
 	} icsk_ack;//这个结构是为了连接请求过程中的“应答”目的。
 	struct {
-		int		  enabled;
+		int		  enabled; //是否启动了mtu探测
 
 		/* Range of MTUs to search */
-		int		  search_high;
-		int		  search_low;
+		int		  search_high;//探测MTU最大值。
+		int		  search_low;//探测MTU最小值。
 
 		/* Information on the current probe. */
 		int		  probe_size;

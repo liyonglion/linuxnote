@@ -32,9 +32,9 @@
 #define MAX_INET_PROTOS	256		/* Must be a power of 2		*/
 
 
-/* This is used to register protocols. */
-struct net_protocol {//传输层函数表结构
-	int			(*handler)(struct sk_buff *skb);//处理到达数据包得函数指针
+/* This is used to register protocols.通过网络层的protocol字段，来确定传输层协议。 */
+struct net_protocol {//传输层协议函数表结构
+	int			(*handler)(struct sk_buff *skb);//网络层调用该协议层函数，来通知协议层处理数据。tcp 为：tcp_protocol; udp 为：udp_protocol; icmp为：icmp_protocol;
 	void			(*err_handler)(struct sk_buff *skb, u32 info);//ICMP得处理函数指针
 	int			(*gso_send_check)(struct sk_buff *skb);//分段数据包校验和函数指针
 	struct sk_buff	       *(*gso_segment)(struct sk_buff *skb,
@@ -67,15 +67,15 @@ struct inet6_protocol
 #endif
 
 /* This is used to register socket interfaces for IP protocols.  */
-struct inet_protosw {
+struct inet_protosw {// 把INET套接字的操作集与传输层协议操作集关联起来
 	struct list_head list;
 
         /* 下面两个变量用于校对使用  */
-	unsigned short	 type;	   /* This is the 2nd argument to socket(2). 对应socket的类型 */
-	unsigned short	 protocol; /* This is the L4 protocol number. IP协议编码 */
+	unsigned short	 type;	   /* This is the 2nd argument to socket(2). 对应socket的类型 例如：SOCK_STREAM、SOCK_DGRAM */
+	unsigned short	 protocol; /* This is the L4 protocol number. IP协议编码 例如：PROTOCOL_TCP、PROTOCOL_UDP */
 
-	struct proto	 *prot; //对应的协议结构体指针。例如：TCP_prot,udp_prot
-	const struct proto_ops *ops; //对应协议的函数操作表指针
+	struct proto	 *prot; //对应的协议层操作集。例如：TCP_prot,udp_prot
+	const struct proto_ops *ops; //对应socket类型的函数操作表指针。该结构体实现套接字接口层函数到传输层函数的调用。
   
 	int              capability; /* Which (if any) capability do
 				      * we need to use this socket
@@ -86,7 +86,7 @@ struct inet_protosw {
 };
 #define INET_PROTOSW_REUSE 0x01	     /* Are ports automatically reusable? 端口是否可以自动重用 */
 #define INET_PROTOSW_PERMANENT 0x02  /* Permanent protocols are unremovable. 不能移除的协议 */
-#define INET_PROTOSW_ICSK      0x04  /* Is this an inet_connection_sock?  这是一个inet_connection_sock类型*/
+#define INET_PROTOSW_ICSK      0x04  /* 这是一个inet_connection_sock类型。ICSK = Internet Connection Socket。该字段主要标识协议属于 ​​面向连接的协议​​（如 TCP），需要维护连接状态（如 SYN、ESTABLISHED）。协议实例会使用 struct inet_connection_sock（而非基础的 struct inet_sock）作为套接字私有数据。*/
 
 extern struct net_protocol *inet_protocol_base;
 extern struct net_protocol *inet_protos[MAX_INET_PROTOS];

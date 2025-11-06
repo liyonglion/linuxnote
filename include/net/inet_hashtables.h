@@ -128,7 +128,7 @@ struct inet_hashinfo {
 	rwlock_t			lhash_lock ____cacheline_aligned;
 	atomic_t			lhash_users;
 	wait_queue_head_t		lhash_wait;//等待队列头
-	struct kmem_cache			*bind_bucket_cachep;//告诉缓存
+	struct kmem_cache			*bind_bucket_cachep;//高速缓存
 };
 
 static inline struct inet_ehash_bucket *inet_ehash_bucket(

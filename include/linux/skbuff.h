@@ -146,14 +146,14 @@ struct skb_frag_struct {//分散数据块结构
  */
 struct skb_shared_info {//用于支持IP数据分片和TCP数据分段。
 	atomic_t	dataref;//使用计数
-	unsigned short	nr_frags;//分散的数据块数。数据包被分割的数据片的计数，描述了一个数据包最终被分成了多少个数据片，这个域是支持IP分片使用的。
+	unsigned short	nr_frags;//分散的数据块数。数据包被分割的数据片的计数，描述了一个数据包最终被分成了多少个数据片，这个域是支持IP分片使用的。​分散存储的页面数量​​（frags数组中有效项数）
 	unsigned short	gso_size;//分段数据包的大小
 	/* Warning: this field is not always filled in (UFO)! */
 	unsigned short	gso_segs;//分段数据包的个数
-	unsigned short  gso_type;//分段数据包的类型
+	unsigned short  gso_type;//分段数据包的类型。分段类型​​（如 SKB_GSO_TCPV4、SKB_GSO_UDP）。
 	__be32          ip6_frag_id;//IPV6使用
-	struct sk_buff	*frag_list;//数据包被成片段，该域是指向存放分片数据链表其实地址的指针。
-	skb_frag_t	frags[MAX_SKB_FRAGS];//分散数据块队列（数组）。一个页表入口数组，每一个入口就是一个TCP的段。
+	struct sk_buff	*frag_list;//数据包被成片段，该域是指向存放分片数据链表其实地址的指针。指向分片链表的指针​​（用于 IP 分片或 TCP 分段）。
+	skb_frag_t	frags[MAX_SKB_FRAGS];//分散数据块队列（数组）。一个页表入口数组，每一个入口就是一个TCP的段。分散存储的页面描述符数组​​，每个元素描述一个内存页片段。
 };
 
 /* We divide dataref into two halves.  The higher 16 bits hold references
@@ -260,8 +260,8 @@ struct sk_buff {
 	struct sk_buff		*prev; //队列中的前一个数据包
 
 	struct sock		*sk; //struc sock 指针
-	ktime_t			tstamp; //数据包到达时间
-	struct net_device	*dev; //接收|发送 数据包的设备
+	ktime_t			tstamp; //数据包到达时间。通常只对一个已接收封包才有意义。此字段由netif_rx函数调用net_timestamp()函数设置，该函数在接收每个封包之后由设备驱动程序调用
+	struct net_device	*dev; //接收|发送 数据包的设备。在虚拟接口中，虚拟设备驱动程序提供接口服务，dev指向虚拟设备的net_device结构。驱动程序会从其他群组中选择一个特定设备，然后把dev参数改为指向设备的net_device数据接口，在这种情况下，封包处理期间传输设备的指针可能会变化
 
 	union {
 		struct  dst_entry	*dst; //路由项
@@ -278,7 +278,7 @@ struct sk_buff {
 	 */
 	char			cb[48];
 
-	unsigned int		len,//全部数据块的总长度
+	unsigned int		len,//全部数据块的总长度。包括主要缓冲区的数据以及一些片段的数据。当缓冲区从一个网络分层移往下一个网络分层时，其值会发生变化，因为在网络协议栈中上移时报头会被丢弃，往下时报头会被添加进来。len也会把协议报头算在内。
 				data_len; //非线性区数据长度
 	__u16			mac_len, //链路层头部长度
 				hdr_len; //在克隆数据包时可写的头部长度
@@ -302,7 +302,7 @@ struct sk_buff {
 				nf_trace:1; //netfilter 对数据包的跟踪标志
 	__be16			protocol; //底层驱动使用的数据包协议
 
-	void			(*destructor)(struct sk_buff *skb); //销毁数据包的函数
+	void			(*destructor)(struct sk_buff *skb); //销毁数据包的函数。当一个缓冲区不属于一个套接字时，destructor通常不会被初始化。当此缓冲区属于一个套接字时，通常设置成sock_rfree或sock_wfree
 #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
 	struct nf_conntrack	*nfct;
 	struct sk_buff		*nfct_reasm;
@@ -343,8 +343,8 @@ struct sk_buff {
 	sk_buff_data_t		end; //指向缓冲块的结束地址
 	unsigned char		*head,//指向缓冲块的开始地址
 				*data;//指向数据块的开始地址
-	unsigned int		truesize; //数据包的实际长度，结构长度与数据块长度之和
-	atomic_t		users; //数据包的使用计数器
+	unsigned int		truesize; //当前数据包的实际长度，在不同的层，该字段会变化。结构长度(sk_buff结构本身)与数据块长度之和。
+	atomic_t		users; //数据包的使用计数器。
 };
 
 #ifdef __KERNEL__
@@ -823,12 +823,12 @@ static inline int skb_pagelen(const struct sk_buff *skb)
 static inline void skb_fill_page_desc(struct sk_buff *skb, int i,
 				      struct page *page, int off, int size)
 {
-	skb_frag_t *frag = &skb_shinfo(skb)->frags[i];
+	skb_frag_t *frag = &skb_shinfo(skb)->frags[i];//获取共享结构对应位置的分散数据结构
 
-	frag->page		  = page;
-	frag->page_offset	  = off;
-	frag->size		  = size;
-	skb_shinfo(skb)->nr_frags = i + 1;
+	frag->page		  = page;//记录保存数据的内存页面
+	frag->page_offset	  = off;//记录数据在内存中的偏移位置
+	frag->size		  = size;//记录数据的长度,也是分散数据块的长度
+	skb_shinfo(skb)->nr_frags = i + 1;//递增分散数据块数量
 }
 
 #define SKB_PAGE_ASSERT(skb) 	BUG_ON(skb_shinfo(skb)->nr_frags)
@@ -1130,12 +1130,12 @@ extern int ___pskb_trim(struct sk_buff *skb, unsigned int len);
 
 static inline void __skb_trim(struct sk_buff *skb, unsigned int len)
 {
-	if (unlikely(skb->data_len)) {
+	if (unlikely(skb->data_len)) {//检查是否有分散数据块
 		WARN_ON(1);
 		return;
 	}
-	skb->len = len;
-	skb_set_tail_pointer(skb, len);
+	skb->len = len;//记录数据块长度
+	skb_set_tail_pointer(skb, len);//记录数据块的结束地址
 }
 
 extern void skb_trim(struct sk_buff *skb, unsigned int len);
@@ -1329,31 +1329,31 @@ static inline int skb_padto(struct sk_buff *skb, unsigned int len)
 static inline int skb_add_data(struct sk_buff *skb,
 			       char __user *from, int copy)
 {
-	const int off = skb->len;
+	const int off = skb->len;//获取数据包数据块的长度
 
-	if (skb->ip_summed == CHECKSUM_NONE) {
+	if (skb->ip_summed == CHECKSUM_NONE) {//查看检验和标志
 		int err = 0;
 		__wsum csum = csum_and_copy_from_user(from, skb_put(skb, copy),
-							    copy, 0, &err);
+							    copy, 0, &err);//复制到数据并计算检验和
 		if (!err) {
-			skb->csum = csum_block_add(skb->csum, csum, off);
+			skb->csum = csum_block_add(skb->csum, csum, off);//调整检验和
 			return 0;
 		}
-	} else if (!copy_from_user(skb_put(skb, copy), from, copy))
+	} else if (!copy_from_user(skb_put(skb, copy), from, copy))//直接复制数据
 		return 0;
 
-	__skb_trim(skb, off);
+	__skb_trim(skb, off);//还原数据块
 	return -EFAULT;
 }
-
+//是否可以和上一个TCP数据段合并
 static inline int skb_can_coalesce(struct sk_buff *skb, int i,
 				   struct page *page, int off)
 {
 	if (i) {
-		struct skb_frag_struct *frag = &skb_shinfo(skb)->frags[i - 1];
+		struct skb_frag_struct *frag = &skb_shinfo(skb)->frags[i - 1];//获取最后一个分散数据
 
-		return page == frag->page &&
-		       off == frag->page_offset + frag->size;
+		return page == frag->page &&//判断是否是最后一个分散数据块的内存页面
+		       off == frag->page_offset + frag->size;//判断偏移地址是否相等
 	}
 	return 0;
 }

@@ -38,10 +38,10 @@
  * @ts_needaddr - Need to record addr of outgoing dev
  */
 struct ip_options {//IP选项结构
-	__be32		faddr;//转发地址
+	__be32		faddr;//存在宽松路由或严格路由选项时，用来记录下一跳的IP地址
 	unsigned char	optlen;//选项长度
-	unsigned char	srr;//源路由在头部的位置
-	unsigned char	rr;//记录路由在头部的位置
+	unsigned char	srr;//记录宽松路由或严格路由选项在IP首部中的偏移量，即选项的第一个字节的地址减去IP首部的第一个字节的地址
+	unsigned char	rr;//用于记录记录路径选项在IP首部中的偏移量
 	unsigned char	ts;//时间戳在头部的位置
 	unsigned char	is_strictroute:1,//标识强制路由
 			srr_is_hit:1,//表示数据包目的地址在源路由中
@@ -52,7 +52,7 @@ struct ip_options {//IP选项结构
 	unsigned char	router_alert;//路由警报
 	unsigned char	cipso;//商业互联安全协议选项
 	unsigned char	__pad2;//用于数据对齐
-	unsigned char	__data[0];//用于保存IP选项数据指针
+	unsigned char	__data[0];//若选项有数据则从该字段开始，使之紧跟在ip_options结构后面，最多不超过40字节
 };
 
 #define optlength(opt) (sizeof(struct ip_options) + opt->optlen)
@@ -104,7 +104,7 @@ struct rtable;
  * @mc_list - Group array
  * @cork - info to build ip hdr on each ip frag while socket is corked
  */
-struct inet_sock {//inet协议族结构。描述ip协议的通用传输控制信息，相比sock增加了套接字地址、端口等信息。
+struct inet_sock {//inet协议族结构，主要描述IP层的信息。描述ip协议的通用传输控制信息，相比sock增加了套接字地址、端口等信息。
 	/* sk and pinet6 has to be the first two members of inet_sock */
 	struct sock		sk;
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
@@ -123,7 +123,7 @@ struct inet_sock {//inet协议族结构。描述ip协议的通用传输控制信
 	__u16			id;//ip 头中的流ID，用于DF包的标识
 	__u8			tos;
 	__u8			mc_ttl;//组播TTL
-	__u8			pmtudisc;//是否按照MTU分包
+	__u8			pmtudisc;//是否按照MTU分包；是否MTU探测？
 	__u8			recverr:1,
 				is_icsk:1, //标识是否是inet_connection_sock类型
 				freebind:1,

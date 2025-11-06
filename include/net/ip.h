@@ -152,7 +152,7 @@ void ip_send_reply(struct sock *sk, struct sk_buff *skb, struct ip_reply_arg *ar
 struct ipv4_config
 {
 	int	log_martians;
-	int	no_pmtu_disc;
+	int	no_pmtu_disc;//该值被映射到sysctl中的net.ipv4.ip_no_pmtu_disc。也就以为这只能通过sysctl修改
 };
 
 extern struct ipv4_config ipv4_config;

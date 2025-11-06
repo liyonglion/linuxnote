@@ -285,9 +285,9 @@ atomic_t tcp_orphan_count = ATOMIC_INIT(0);
 
 EXPORT_SYMBOL_GPL(tcp_orphan_count);
 
-int sysctl_tcp_mem[3] __read_mostly;
-int sysctl_tcp_wmem[3] __read_mostly;
-int sysctl_tcp_rmem[3] __read_mostly;
+int sysctl_tcp_mem[3] __read_mostly;//tcp所占内存限制。单位是page，此值是动态的，linux根据机器自身内存情况进行分配。在[0]这个页数之下，TCP不担心内存需求;当TCP分配的内存量超过[1]页数时，TCP将减缓其内存消耗并进入内存压力模式，当内存消耗低于[0]时，该模式将退出。所有TCP套接字允许排队的页面数。超出[2]则打印Out of socket memory
+int sysctl_tcp_wmem[3] __read_mostly;//单位字节 发送缓存区大小，缓存应用程序的数据，有序列号被应答确认的数据会从发送缓冲区删除掉。[0]默认4K，为TCP套接字的发送缓冲区保留的内存量。每个TCP套接字由于其诞生的事实而有权使用它。[1]最大16K，自动调整。TCP套接字使用的发送缓冲区的初始大小。此值将覆盖net.core.wmem_default，通常低于net.core.wmem_default;[2]介于64K和4MB之间，具体取决于RAM大小。TCP套接字的发送缓冲区所允许的最大内存量。此值不会覆盖net.core.wmem_max。使用SO_SNDBUF调用setsockopt()会禁用该套接字的发送缓冲区大小的自动调整，在这种情况下该值将被忽略。
+int sysctl_tcp_rmem[3] __read_mostly;//单位是字节 接收缓存区大小，缓存从对端接收的数据，后续会被应用程序读取。[0]默认值4K，TCP套接字使用的接收缓冲区的最小大小。即使在中等的内存压力下，它也能保证连接到每个TCP套接字。默认值87380字节，TCP套接字使用的接收缓冲区的初始大小。[1]此值覆盖net.core.rmem默认值。此值将导致窗口为65535;介于87380字节和6MB之间，取决RAM大小。[2]TCP套接字接收器允许接收缓冲区的最大大小，此值不会覆盖net.core.rmem_max。使用SO_RCVBUF调用setsockopt()将禁用该套接字的接收缓冲区大小的自动调整，在这种情况下，将忽略此值。
 
 EXPORT_SYMBOL(sysctl_tcp_mem);
 EXPORT_SYMBOL(sysctl_tcp_rmem);
@@ -479,19 +479,19 @@ static inline int forced_push(struct tcp_sock *tp)
 
 static inline void skb_entail(struct sock *sk, struct sk_buff *skb)
 {
-	struct tcp_sock *tp = tcp_sk(sk);
-	struct tcp_skb_cb *tcb = TCP_SKB_CB(skb);
+	struct tcp_sock *tp = tcp_sk(sk);//获取tcp_sock结构指针
+	struct tcp_skb_cb *tcb = TCP_SKB_CB(skb);//获取TCP控制块结构
 
-	skb->csum    = 0;
-	tcb->seq     = tcb->end_seq = tp->write_seq;
-	tcb->flags   = TCPCB_FLAG_ACK;
-	tcb->sacked  = 0;
-	skb_header_release(skb);
-	tcp_add_write_queue_tail(sk, skb);
-	sk->sk_wmem_queued += skb->truesize;
-	sk_mem_charge(sk, skb->truesize);
-	if (tp->nonagle & TCP_NAGLE_PUSH)
-		tp->nonagle &= ~TCP_NAGLE_PUSH;
+	skb->csum    = 0;//包校验和
+	tcb->seq     = tcb->end_seq = tp->write_seq;//设置发送序列号
+	tcb->flags   = TCPCB_FLAG_ACK;//设置标志
+	tcb->sacked  = 0;//清除SACK标志
+	skb_header_release(skb);//设置无头部标志
+	tcp_add_write_queue_tail(sk, skb);//将数据包链入sock发送队列的尾部
+	sk->sk_wmem_queued += skb->truesize;//递增内存计数
+	sk_mem_charge(sk, skb->truesize);//递增可用内存计数器
+	if (tp->nonagle & TCP_NAGLE_PUSH)//检查 nagle算法标志
+		tp->nonagle &= ~TCP_NAGLE_PUSH;//清除标志
 }
 
 static inline void tcp_mark_urg(struct tcp_sock *tp, int flags,
@@ -502,7 +502,7 @@ static inline void tcp_mark_urg(struct tcp_sock *tp, int flags,
 		tp->snd_up = tp->write_seq;
 	}
 }
-
+//设置URG或PUSH标志后，__tcp_push_pending_frames函数来发送数据包
 static inline void tcp_push(struct sock *sk, int flags, int mss_now,
 			    int nonagle)
 {
@@ -511,8 +511,8 @@ static inline void tcp_push(struct sock *sk, int flags, int mss_now,
 	if (tcp_send_head(sk)) {
 		struct sk_buff *skb = tcp_write_queue_tail(sk);
 		if (!(flags & MSG_MORE) || forced_push(tp))
-			tcp_mark_push(tp, skb);
-		tcp_mark_urg(tp, flags, skb);
+			tcp_mark_push(tp, skb);//设置PUSH标志
+		tcp_mark_urg(tp, flags, skb); //设置URG标志
 		__tcp_push_pending_frames(sk, mss_now,
 					  (flags & MSG_MORE) ? TCP_NAGLE_CORK : nonagle);
 	}
@@ -637,22 +637,22 @@ struct sk_buff *sk_stream_alloc_skb(struct sock *sk, int size, gfp_t gfp)
 	struct sk_buff *skb;
 
 	/* The TCP header must be at least 32-bit aligned.  */
-	size = ALIGN(size, 4);
+	size = ALIGN(size, 4);//分配长度4字节对齐
 
-	skb = alloc_skb_fclone(size + sk->sk_prot->max_header, gfp);
-	if (skb) {
-		if (sk_wmem_schedule(sk, skb->truesize)) {
+	skb = alloc_skb_fclone(size + sk->sk_prot->max_header, gfp);//分配新的数据包、缓冲块长度调整为包含头部的长度,同时分配共享结构空间,gfp是分配标志默认为 GFP KERNEL
+	if (skb) {//分配成功
+		if (sk_wmem_schedule(sk, skb->truesize)) {//检查数据包的实际尺寸，调整sock结构的可用内存、分配内存计数器
 			/*
 			 * Make sure that we have exactly size bytes
 			 * available to the caller, no more, no less.
 			 */
-			skb_reserve(skb, skb_tailroom(skb) - size);
-			return skb;
+			skb_reserve(skb, skb_tailroom(skb) - size);//调整数据块的起始、结束地址
+			return skb;//返回包结构指针
 		}
 		__kfree_skb(skb);
 	} else {
-		sk->sk_prot->enter_memory_pressure();
-		sk_stream_moderate_sndbuf(sk);
+		sk->sk_prot->enter_memory_pressure();//设置内存压力标志
+		sk_stream_moderate_sndbuf(sk);//调整发送缓冲的极限值
 	}
 	return NULL;
 }
@@ -796,18 +796,22 @@ ssize_t tcp_sendpage(struct socket *sock, struct page *page, int offset,
 
 static inline int select_size(struct sock *sk)
 {
-	struct tcp_sock *tp = tcp_sk(sk);
-	int tmp = tp->mss_cache;
-
-	if (sk->sk_route_caps & NETIF_F_SG) {
-		if (sk_can_gso(sk))
+	struct tcp_sock *tp = tcp_sk(sk);//获取 tcp_sock 结构
+	int tmp = tp->mss_cache;//获取MSS值，这个值初始化时为536，这个值在客户端与服务器握手连接过程中再次通过tcp_sync_mss()中更新
+	//处理支持分散/收集（ scatter/gather）IO 的网卡。许多 卡都支持此功能，并使用 NETIF_F_SG 标志进行通告。
+	//支持该特性的网卡可以处理数据 被分散到多个 buffer 的数据包;内核不需要花时间将多个缓冲区合并成一个缓冲区中。
+	//避免这种额外的复制会提升性能，大多数网卡都支持此功能
+	if (sk->sk_route_caps & NETIF_F_SG) {//查看路由分段标志
+		//GSO就是利用NETIF_F_SG这个特性，在tcp_sendmsg的时候申请的skb的主buff只存L2/L3/L4的协议头，把所有的数据先放到skb_shinfo(skb)->frags里。
+		//等到skb交给网卡驱动前再分片
+		if (sk_can_gso(sk))//如果路由支持GSO特性,则直接返回0，外面只会申请主buff只存L2/L3/L4的协议头
 			tmp = 0;
 		else {
-			int pgbreak = SKB_MAX_HEAD(MAX_TCP_HEADER);
+			int pgbreak = SKB_MAX_HEAD(MAX_TCP_HEADER);//内存页可以负载的传输层数据长度,即内存页面长度减掉全部头部的长度
 
-			if (tmp >= pgbreak &&
-			    tmp <= pgbreak + (MAX_SKB_FRAGS - 1) * PAGE_SIZE)
-				tmp = pgbreak;
+			if (tmp >= pgbreak &&//检查是否超过一个内存页面的负载长度
+			    tmp <= pgbreak + (MAX_SKB_FRAGS - 1) * PAGE_SIZE)//是否小于最大分散数据块的内存页面长度
+				tmp = pgbreak;//记录内存页面的负载值为
 		}
 	}
 
@@ -817,221 +821,221 @@ static inline int select_size(struct sock *sk)
 int tcp_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 		size_t size)
 {
-	struct sock *sk = sock->sk;
-	struct iovec *iov;
-	struct tcp_sock *tp = tcp_sk(sk);
-	struct sk_buff *skb;
+	struct sock *sk = sock->sk;//sock 结构
+	struct iovec *iov;//缓冲区结构指针
+	struct tcp_sock *tp = tcp_sk(sk);//获取tcp_sock结构
+	struct sk_buff *skb;//数据包指针
 	int iovlen, flags;
 	int mss_now, size_goal;
 	int err, copied;
 	long timeo;
 
-	lock_sock(sk);
-	TCP_CHECK_TIMER(sk);
+	lock_sock(sk);//加锁,如果 sock锁被其他进程占用了,当前进程睡眠等待唤醒
+	TCP_CHECK_TIMER(sk);//空语句
 
-	flags = msg->msg_flags;
-	timeo = sock_sndtimeo(sk, flags & MSG_DONTWAIT);
+	flags = msg->msg_flags;//获取消息结构的标志
+	timeo = sock_sndtimeo(sk, flags & MSG_DONTWAIT);//确定发送超时时间
 
-	/* Wait for a connection to finish. */
+	/* Wait for a connection to finish. 定时等待sock进人连接状态*/
 	if ((1 << sk->sk_state) & ~(TCPF_ESTABLISHED | TCPF_CLOSE_WAIT))
 		if ((err = sk_stream_wait_connect(sk, &timeo)) != 0)
 			goto out_err;
 
 	/* This should be in poll */
-	clear_bit(SOCK_ASYNC_NOSPACE, &sk->sk_socket->flags);
+	clear_bit(SOCK_ASYNC_NOSPACE, &sk->sk_socket->flags);//清除标识
 
-	mss_now = tcp_current_mss(sk, !(flags&MSG_OOB));
-	size_goal = tp->xmit_size_goal;
+	mss_now = tcp_current_mss(sk, !(flags&MSG_OOB));//计算mss，后面会根据这个值来分段
+	size_goal = tp->xmit_size_goal;//允许发送的最大长度，基本上是tcp的mss。如果开启了TSO，则是mss的整数倍。该值在tcp_current_mss()函数中进行赋值
 
 	/* Ok commence sending. */
-	iovlen = msg->msg_iovlen;
-	iov = msg->msg_iov;
+	iovlen = msg->msg_iovlen;//缓冲区数量
+	iov = msg->msg_iov;//缓冲区指针
 	copied = 0;
 
 	err = -EPIPE;
-	if (sk->sk_err || (sk->sk_shutdown & SEND_SHUTDOWN))
+	if (sk->sk_err || (sk->sk_shutdown & SEND_SHUTDOWN))//是否出错关闭
 		goto do_error;
 
-	while (--iovlen >= 0) {
-		int seglen = iov->iov_len;
-		unsigned char __user *from = iov->iov_base;
+	while (--iovlen >= 0) {//循环发送每个缓冲区的数据
+		int seglen = iov->iov_len;//缓冲区的长度
+		unsigned char __user *from = iov->iov_base;//缓冲区地址
 
-		iov++;
+		iov++;//指向下一个缓冲区
 
-		while (seglen > 0) {
+		while (seglen > 0) {//缓冲区长度大于0，标识有效
 			int copy;
 
-			skb = tcp_write_queue_tail(sk);
+			skb = tcp_write_queue_tail(sk);//获取发送队列中的最后一个包
 
-			if (!tcp_send_head(sk) ||
-			    (copy = size_goal - skb->len) <= 0) {
+			if (!tcp_send_head(sk) ||//如果sock发送头中没有急需发送的数据包
+			    (copy = size_goal - skb->len) <= 0) {//数据包的数据块长度抵达发送极限，注意这里的skb为发送队列中的最后一个包，说明发送队列中最后一个包的数据块长度已经达到了发送极限，无法借用该包空间
 
 new_segment:
 				/* Allocate new segment. If the interface is SG,
 				 * allocate skb fitting to single page.
 				 */
-				if (!sk_stream_memory_free(sk))
-					goto wait_for_sndbuf;
-
+				if (!sk_stream_memory_free(sk))//如果发送缓存不足，就跳转
+					goto wait_for_sndbuf;//跳转到等待缓存点
+				//注意这里的size为有效负载，不包括L2/L3/L4协议头
 				skb = sk_stream_alloc_skb(sk, select_size(sk),
-						sk->sk_allocation);
-				if (!skb)
+						sk->sk_allocation);//分配数据包结构空间，按MSS大小分配。这里的select_size是根据MSS计算的
+				if (!skb)//内存不足，跳转到等待内存处
 					goto wait_for_memory;
 
 				/*
 				 * Check whether we can use HW checksum.
 				 */
-				if (sk->sk_route_caps & NETIF_F_ALL_CSUM)
-					skb->ip_summed = CHECKSUM_PARTIAL;
+				if (sk->sk_route_caps & NETIF_F_ALL_CSUM)//查看检验和能力
+					skb->ip_summed = CHECKSUM_PARTIAL;//设置为硬件检验和
 
-				skb_entail(sk, skb);
-				copy = size_goal;
+				skb_entail(sk, skb);//将数据包链入sock发送队列，设置seq 号、ack标识
+				copy = size_goal;//复制长度为最大值
 			}
 
 			/* Try to append data to the end of skb. */
-			if (copy > seglen)
-				copy = seglen;
+			if (copy > seglen)//如果大于缓冲区长度
+				copy = seglen;//缓冲区长度做为复制长度
 
 			/* Where to copy to? */
-			if (skb_tailroom(skb) > 0) {
+			if (skb_tailroom(skb) > 0) {//如果数据包的主缓冲块可以存放
 				/* We have some space in skb head. Superb! */
-				if (copy > skb_tailroom(skb))
-					copy = skb_tailroom(skb);
-				if ((err = skb_add_data(skb, from, copy)) != 0)
+				if (copy > skb_tailroom(skb))//缓冲块剩余长度是否满足复制长度
+					copy = skb_tailroom(skb);//调整为缓冲块剩余长度
+				if ((err = skb_add_data(skb, from, copy)) != 0)//复制用户数据(应用程序提供的数据),存放到数据包的数据块中
 					goto do_fault;
-			} else {
+			} else {//如果主缓冲块已经用完,使用分散数据块存放
 				int merge = 0;
-				int i = skb_shinfo(skb)->nr_frags;
-				struct page *page = TCP_PAGE(sk);
-				int off = TCP_OFF(sk);
+				int i = skb_shinfo(skb)->nr_frags;//分散数据块数量
+				struct page *page = TCP_PAGE(sk);//获取sock 结构用做发送的内存页面
+				int off = TCP_OFF(sk);//获取内存页面中的偏移位置
 
-				if (skb_can_coalesce(skb, i, page, off) &&
-				    off != PAGE_SIZE) {
+				if (skb_can_coalesce(skb, i, page, off) &&//它是否为最后一个内存页面
+				    off != PAGE_SIZE) {//如果内存页面还没有用完
 					/* We can extend the last page
 					 * fragment. */
-					merge = 1;
-				} else if (i == MAX_SKB_FRAGS ||
-					   (!i &&
-					   !(sk->sk_route_caps & NETIF_F_SG))) {
+					merge = 1;//设置合并标志,表示可以将数据保存到这个内存页面
+				} else if (i == MAX_SKB_FRAGS ||//如果达到了分散数据块极限
+					   (!i &&//如果没有分散数据块
+					   !(sk->sk_route_caps & NETIF_F_SG))) {//如果不支持分散
 					/* Need to add new fragment and cannot
 					 * do this because interface is non-SG,
 					 * or because all the page slots are
 					 * busy. */
-					tcp_mark_push(tp, skb);
-					goto new_segment;
-				} else if (page) {
-					if (off == PAGE_SIZE) {
-						put_page(page);
-						TCP_PAGE(sk) = page = NULL;
-						off = 0;
+					tcp_mark_push(tp, skb);//设置PUSH控制标志
+					goto new_segment;//分配新的数据包
+				} else if (page) {//如果存在可用内存页面
+					if (off == PAGE_SIZE) {//如果内存页面已经用完
+						put_page(page);//递减内存页面的使用计数
+						TCP_PAGE(sk) = page = NULL;//释放sock结构用做发送的内存
+						off = 0;//偏移为0
 					}
-				} else
-					off = 0;
+				} else//没有可用的内存页
+					off = 0;//偏移为0
 
-				if (copy > PAGE_SIZE - off)
-					copy = PAGE_SIZE - off;
+				if (copy > PAGE_SIZE - off)//如果复制长度大于内存页面剩余长度
+					copy = PAGE_SIZE - off;//设置为内存页面的剩余长度
 
-				if (!sk_wmem_schedule(sk, copy))
-					goto wait_for_memory;
+				if (!sk_wmem_schedule(sk, copy))//检查是否超过了sock分配计数
+					goto wait_for_memory;//跳转到等待内存处
 
-				if (!page) {
+				if (!page) {//如果sock结构没有提供发送的内存页面
 					/* Allocate new cache page. */
-					if (!(page = sk_stream_alloc_page(sk)))
-						goto wait_for_memory;
+					if (!(page = sk_stream_alloc_page(sk)))///分配内存页面
+						goto wait_for_memory;//无法分配内存页面跳转到等待内存处
 				}
 
 				/* Time to copy data. We are close to
 				 * the end! */
 				err = skb_copy_to_page(sk, from, skb, page,
-						       off, copy);
-				if (err) {
+						       off, copy);//将用户数据存放到内存页面中
+				if (err) {//复制出现错误
 					/* If this page was new, give it to the
 					 * socket so it does not get leaked.
 					 */
-					if (!TCP_PAGE(sk)) {
-						TCP_PAGE(sk) = page;
-						TCP_OFF(sk) = 0;
+					if (!TCP_PAGE(sk)) {//sock结构没有记录发送的内存页面
+						TCP_PAGE(sk) = page;//记录新建的发送内存页面
+						TCP_OFF(sk) = 0;//记录内存页面偏移位置
 					}
-					goto do_error;
+					goto do_error;//错误返回
 				}
 
 				/* Update the skb. */
-				if (merge) {
+				if (merge) {//如果使用了数据包最后一个分散数据块的内存页面
 					skb_shinfo(skb)->frags[i - 1].size +=
-									copy;
-				} else {
-					skb_fill_page_desc(skb, i, page, off, copy);
-					if (TCP_PAGE(sk)) {
-						get_page(page);
-					} else if (off + copy < PAGE_SIZE) {
-						get_page(page);
-						TCP_PAGE(sk) = page;
+									copy;//调整分散数据块的长度
+				} else {//如果使用了 sock 结构的可用内存页面或者新建的内存页面
+					skb_fill_page_desc(skb, i, page, off, copy);//内存页面记录到分散数据块结构中
+					if (TCP_PAGE(sk)) {//如果sock结构已经记录了这个内存页面
+						get_page(page);//递增内存页面的使用计数
+					} else if (off + copy < PAGE_SIZE) {//如果是新分配的内存页面并且还有剩余空间
+						get_page(page);//递增内存页面的使用计数
+						TCP_PAGE(sk) = page;//将内存页面记录到sock结构中
 					}
 				}
 
-				TCP_OFF(sk) = off + copy;
+				TCP_OFF(sk) = off + copy;//记录内存页面目前的偏移位置
 			}
 
-			if (!copied)
+			if (!copied)//如果复制完成了，清除PUSH标志
 				TCP_SKB_CB(skb)->flags &= ~TCPCB_FLAG_PSH;
 
-			tp->write_seq += copy;
-			TCP_SKB_CB(skb)->end_seq += copy;
-			skb_shinfo(skb)->gso_segs = 0;
+			tp->write_seq += copy;//数据长度累加到发送序号中
+			TCP_SKB_CB(skb)->end_seq += copy;//数据长度累加到结束序号中
+			skb_shinfo(skb)->gso_segs = 0;//设置分段数据包数量
 
-			from += copy;
-			copied += copy;
-			if ((seglen -= copy) == 0 && iovlen == 0)
+			from += copy;//调整下一次的复制位置
+			copied += copy;//累加复制长度
+			if ((seglen -= copy) == 0 && iovlen == 0)//检查是否复制完成
 				goto out;
 
-			if (skb->len < size_goal || (flags & MSG_OOB))
+			if (skb->len < size_goal || (flags & MSG_OOB))//如果数据块还没有达到极限,或者设置了带外数据标志(TCP紧急数据)
 				continue;
 
-			if (forced_push(tp)) {
-				tcp_mark_push(tp, skb);
-				__tcp_push_pending_frames(sk, mss_now, TCP_NAGLE_PUSH);
-			} else if (skb == tcp_send_head(sk))
-				tcp_push_one(sk, mss_now);
+			if (forced_push(tp)) {//检查发送序号
+				tcp_mark_push(tp, skb);//设置 PUSH控制标志
+				__tcp_push_pending_frames(sk, mss_now, TCP_NAGLE_PUSH);//发送数据包
+			} else if (skb == tcp_send_head(sk))//如果是急需发送的数据包
+				tcp_push_one(sk, mss_now);//检查拥塞情况，分段发送数据包,分段后的数据包留在发送队列，下一次循环复制用户数据后发送
 			continue;
 
-wait_for_sndbuf:
+wait_for_sndbuf://等待缓存点
 			set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
 wait_for_memory:
 			if (copied)
-				tcp_push(sk, flags & ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);
+				tcp_push(sk, flags & ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);//将发送队列中的数据包,调用__tcp_push_pending_frames 函数发送
 
-			if ((err = sk_stream_wait_memory(sk, &timeo)) != 0)
+			if ((err = sk_stream_wait_memory(sk, &timeo)) != 0)//定时等待超时
 				goto do_error;
 
-			mss_now = tcp_current_mss(sk, !(flags&MSG_OOB));
-			size_goal = tp->xmit_size_goal;
+			mss_now = tcp_current_mss(sk, !(flags&MSG_OOB));//设置mss
+			size_goal = tp->xmit_size_goal;//记录最大发送长度
 		}
 	}
 
-out:
+out://如果缓冲区数据全部复制完成
 	if (copied)
-		tcp_push(sk, flags, mss_now, tp->nonagle);
-	TCP_CHECK_TIMER(sk);
-	release_sock(sk);
-	return copied;
+		tcp_push(sk, flags, mss_now, tp->nonagle);//如果是急需发送,就将队列中的最后一个数据包发送出去
+	TCP_CHECK_TIMER(sk);//空语句
+	release_sock(sk);//解锁,并唤醒 sock锁上的其他进程
+	return copied;//返回复制的长度
 
-do_fault:
-	if (!skb->len) {
-		tcp_unlink_write_queue(skb, sk);
+do_fault://失败处理
+	if (!skb->len) {//数据长度为0
+		tcp_unlink_write_queue(skb, sk);//从发送队列中脱队
 		/* It is the one place in all of TCP, except connection
 		 * reset, where we can be unlinking the send_head.
 		 */
-		tcp_check_send_head(sk, skb);
-		sk_wmem_free_skb(sk, skb);
+		tcp_check_send_head(sk, skb);//从发送头中摘除
+		sk_wmem_free_skb(sk, skb);//释放数据包，还原内存计数
 	}
 
-do_error:
-	if (copied)
+do_error://错误处理
+	if (copied)//如果有复制
 		goto out;
-out_err:
-	err = sk_stream_error(sk, flags, err);
+out_err://超时错误
+	err = sk_stream_error(sk, flags, err);//查询错误值
 	TCP_CHECK_TIMER(sk);
-	release_sock(sk);
+	release_sock(sk);//解锁,并唤醒 sock锁上的其他进程
 	return err;
 }
 
@@ -1153,19 +1157,19 @@ void tcp_cleanup_rbuf(struct sock *sk, int copied)
 static void tcp_prequeue_process(struct sock *sk)
 {
 	struct sk_buff *skb;
-	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_sock *tp = tcp_sk(sk);//获取 tcp_sock 结构
 
-	NET_INC_STATS_USER(LINUX_MIB_TCPPREQUEUED);
+	NET_INC_STATS_USER(LINUX_MIB_TCPPREQUEUED);//递增计数
 
 	/* RX process wants to run with disabled BHs, though it is not
 	 * necessary */
-	local_bh_disable();
+	local_bh_disable();//禁用软中断
 	while ((skb = __skb_dequeue(&tp->ucopy.prequeue)) != NULL)
-		sk->sk_backlog_rcv(sk, skb);
-	local_bh_enable();
+		sk->sk_backlog_rcv(sk, skb);//调用tcp_v4_do_rcv()函数
+	local_bh_enable();//启用软中断
 
 	/* Clear memory counter. */
-	tp->ucopy.memory = 0;
+	tp->ucopy.memory = 0;//清零预处理队列内存计数
 }
 
 static inline struct sk_buff *tcp_recv_skb(struct sock *sk, u32 seq, u32 *off)
@@ -1279,30 +1283,30 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	int err;
 	int target;		/* Read at least this many bytes */
 	long timeo;
-	struct task_struct *user_recv = NULL;
+	struct task_struct *user_recv = NULL;//进程结构指针
 	int copied_early = 0;
-	struct sk_buff *skb;
+	struct sk_buff *skb;//数据包指针
 
-	lock_sock(sk);
+	lock_sock(sk);//加锁,如果sock锁被其他进程占用了,当前进程睡眠等待唤醒
 
-	TCP_CHECK_TIMER(sk);
+	TCP_CHECK_TIMER(sk);//空语句
 
 	err = -ENOTCONN;
-	if (sk->sk_state == TCP_LISTEN)
+	if (sk->sk_state == TCP_LISTEN)//接收时应该是连接状态，如果仍于监听状态就返回
 		goto out;
 
-	timeo = sock_rcvtimeo(sk, nonblock);
+	timeo = sock_rcvtimeo(sk, nonblock);//确定接收的定时时间
 
 	/* Urgent data needs to be handled specially. */
-	if (flags & MSG_OOB)
+	if (flags & MSG_OOB)//检查紧急标志,例如控制目的的数据包
 		goto recv_urg;
 
-	seq = &tp->copied_seq;
-	if (flags & MSG_PEEK) {
+	seq = &tp->copied_seq;//指向接收的最后序号
+	if (flags & MSG_PEEK) {//如果设置查看标志，就表示只是查看数据
 		peek_seq = tp->copied_seq;
 		seq = &peek_seq;
 	}
-
+	//确定接收长度,MSGWAITAIL表示宁可等待也要接收到指定长度
 	target = sock_rcvlowat(sk, flags & MSG_WAITALL, len);
 
 #ifdef CONFIG_NET_DMA
@@ -1331,99 +1335,99 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		u32 offset;
 
 		/* Are we at urgent data? Stop if we have read anything or have SIGURG pending. */
-		if (tp->urg_data && tp->urg_seq == *seq) {
-			if (copied)
+		if (tp->urg_data && tp->urg_seq == *seq) {//如果是紧急数据包
+			if (copied)//已经复制完成就跳出外层循环
 				break;
-			if (signal_pending(current)) {
-				copied = timeo ? sock_intr_errno(timeo) : -EAGAIN;
+			if (signal_pending(current)) {//如果有信号需要处理，就跳出外层循环
+				copied = timeo ? sock_intr_errno(timeo) : -EAGAIN;//设置返回码
 				break;
 			}
 		}
 
 		/* Next get a buffer. */
 
-		skb = skb_peek(&sk->sk_receive_queue);
-		do {
-			if (!skb)
+		skb = skb_peek(&sk->sk_receive_queue);//获取接收队列中的第一个数据包
+		do {//循环获取接收队列中的每一个数据包
+			if (!skb)//如果没有数据包就跳出内层循环
 				break;
 
 			/* Now that we have two receive queues this
 			 * shouldn't happen.
 			 */
-			if (before(*seq, TCP_SKB_CB(skb)->seq)) {
+			if (before(*seq, TCP_SKB_CB(skb)->seq)) {//检查序号顺序,判断是否出错
 				printk(KERN_INFO "recvmsg bug: copied %X "
 				       "seq %X\n", *seq, TCP_SKB_CB(skb)->seq);
 				break;
 			}
-			offset = *seq - TCP_SKB_CB(skb)->seq;
-			if (tcp_hdr(skb)->syn)
-				offset--;
-			if (offset < skb->len)
+			offset = *seq - TCP_SKB_CB(skb)->seq;//计算数据块的偏移位置
+			if (tcp_hdr(skb)->syn)//如果设置了SYN标志
+				offset--;//偏移位置减1,因ACK=SYN+1
+			if (offset < skb->len)//如果数据块偏移位置在总长度范围，跳转
 				goto found_ok_skb;
-			if (tcp_hdr(skb)->fin)
+			if (tcp_hdr(skb)->fin)//如果设置了FIN标志,跳转
 				goto found_fin_ok;
 			BUG_TRAP(flags & MSG_PEEK);
-			skb = skb->next;
+			skb = skb->next;//处理下一个数据包
 		} while (skb != (struct sk_buff *)&sk->sk_receive_queue);
 
 		/* Well, if we have backlog, try to process it now yet. */
 
-		if (copied >= target && !sk->sk_backlog.tail)
+		if (copied >= target && !sk->sk_backlog.tail)//如果复制长度超过了指定接收长度或者后备队列为空就跳出外层循环
 			break;
 
-		if (copied) {
-			if (sk->sk_err ||
+		if (copied) {//如果已经复制了数据
+			if (sk->sk_err || //检查是否出错
 			    sk->sk_state == TCP_CLOSE ||
-			    (sk->sk_shutdown & RCV_SHUTDOWN) ||
-			    !timeo ||
-			    signal_pending(current) ||
-			    (flags & MSG_PEEK))
-				break;
-		} else {
-			if (sock_flag(sk, SOCK_DONE))
+			    (sk->sk_shutdown & RCV_SHUTDOWN) || //检查socket是否停用
+			    !timeo || //检查是否超时
+			    signal_pending(current) || //检查是否有信号需要处理
+			    (flags & MSG_PEEK))//检查是否只是查看
+				break;//符合上述条件之一就跳出外层循环
+		} else {//如果还没有复制数据
+			if (sock_flag(sk, SOCK_DONE))//检查是否已经接收了FIN,跳出外层循环
 				break;
 
-			if (sk->sk_err) {
-				copied = sock_error(sk);
+			if (sk->sk_err) {//检查是否有错误
+				copied = sock_error(sk);//返回错误
 				break;
 			}
 
-			if (sk->sk_shutdown & RCV_SHUTDOWN)
+			if (sk->sk_shutdown & RCV_SHUTDOWN)//如果已经关闭跳出外层循环
 				break;
 
-			if (sk->sk_state == TCP_CLOSE) {
-				if (!sock_flag(sk, SOCK_DONE)) {
+			if (sk->sk_state == TCP_CLOSE) {//如果socket已经停用
+				if (!sock_flag(sk, SOCK_DONE)) {//如果没有接收到FIN
 					/* This occurs when user tries to read
 					 * from never connected socket.
 					 */
-					copied = -ENOTCONN;
+					copied = -ENOTCONN;//设置错误值,跳出外层循环
 					break;
 				}
+				break;//socket停用,跳出外层循环
+			}
+
+			if (!timeo) {//如果已经超时
+				copied = -EAGAIN;//设置错误值,跳出外层循环
 				break;
 			}
 
-			if (!timeo) {
-				copied = -EAGAIN;
-				break;
-			}
-
-			if (signal_pending(current)) {
-				copied = sock_intr_errno(timeo);
+			if (signal_pending(current)) {//如果接收到了信号,需要处理信号
+				copied = sock_intr_errno(timeo);//记录超时时间,跳出外层循环
 				break;
 			}
 		}
 
-		tcp_cleanup_rbuf(sk, copied);
-
+		tcp_cleanup_rbuf(sk, copied);//检查是否需要更新接收窗口并发送ACK
+		//如果允许处理预处理队列,并且处理进程不等于接收进程
 		if (!sysctl_tcp_low_latency && tp->ucopy.task == user_recv) {
 			/* Install new reader */
-			if (!user_recv && !(flags & (MSG_TRUNC | MSG_PEEK))) {
-				user_recv = current;
-				tp->ucopy.task = user_recv;
-				tp->ucopy.iov = msg->msg_iov;
+			if (!user_recv && !(flags & (MSG_TRUNC | MSG_PEEK))) {//如果没有指定接收进程,且不是截断和查看操作
+				user_recv = current;//接收进程指定为当前进程
+				tp->ucopy.task = user_recv;//记录接收进程
+				tp->ucopy.iov = msg->msg_iov;//记录缓冲区(服务器程序提供)
 			}
 
-			tp->ucopy.len = len;
+			tp->ucopy.len = len;//记录接收长度
 
 			BUG_TRAP(tp->copied_seq == tp->rcv_nxt ||
 				 (flags & (MSG_PEEK | MSG_TRUNC)));
@@ -1454,78 +1458,81 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 			 * is not empty. It is more elegant, but eats cycles,
 			 * unfortunately.
 			 */
-			if (!skb_queue_empty(&tp->ucopy.prequeue))
-				goto do_prequeue;
+			if (!skb_queue_empty(&tp->ucopy.prequeue))//如果预处理队列不为空
+				goto do_prequeue;//接收预处理队列中的数据包
 
 			/* __ Set realtime policy in scheduler __ */
 		}
-
-		if (copied >= target) {
+		/*
+		复制长度还没有达到要求,接收队列和预处理队列也没有数据包,服务器程序进程只能定时睡眠等待数据包了,这是由sk_wait data()函数设置的。
+		只要接收队列有数据包到来或者定时时间已到,服务器进程就会被唤醒。
+		*/
+		if (copied >= target) {//复制长度达到或者超过指定长度
 			/* Do not sleep, just process backlog. */
-			release_sock(sk);
-			lock_sock(sk);
+			release_sock(sk);//解锁,并唤醒sock锁上的其他进程,处理后备队列的数据包
+			lock_sock(sk);//加锁,如果sock锁被其他进程占用了,当前进程睡眠等待
 		} else
-			sk_wait_data(sk, &timeo);
+			sk_wait_data(sk, &timeo);//定时等待数据
 
 #ifdef CONFIG_NET_DMA
 		tp->ucopy.wakeup = 0;
 #endif
 
-		if (user_recv) {
+		if (user_recv) {//如果指定了接收进程(服务器程序进程)
 			int chunk;
 
 			/* __ Restore normal policy in scheduler __ */
 
-			if ((chunk = len - tp->ucopy.len) != 0) {
-				NET_ADD_STATS_USER(LINUX_MIB_TCPDIRECTCOPYFROMBACKLOG, chunk);
-				len -= chunk;
-				copied += chunk;
+			if ((chunk = len - tp->ucopy.len) != 0) {//计算、检查可复制的长度
+				NET_ADD_STATS_USER(LINUX_MIB_TCPDIRECTCOPYFROMBACKLOG, chunk);//增加计数
+				len -= chunk;//调整下一次接收长度
+				copied += chunk;//累加已复制长度
 			}
 
-			if (tp->rcv_nxt == tp->copied_seq &&
-			    !skb_queue_empty(&tp->ucopy.prequeue)) {
+			if (tp->rcv_nxt == tp->copied_seq && //检查序号
+			    !skb_queue_empty(&tp->ucopy.prequeue)) {//预处理队列不为空
 do_prequeue:
-				tcp_prequeue_process(sk);
+				tcp_prequeue_process(sk);//预处理队列的数据包处理函数
 
-				if ((chunk = len - tp->ucopy.len) != 0) {
+				if ((chunk = len - tp->ucopy.len) != 0) {//计算、检查可复制的长度
 					NET_ADD_STATS_USER(LINUX_MIB_TCPDIRECTCOPYFROMPREQUEUE, chunk);
-					len -= chunk;
-					copied += chunk;
+					len -= chunk;//调整下一次接收长度
+					copied += chunk;//累加已复制长度
 				}
 			}
 		}
-		if ((flags & MSG_PEEK) && peek_seq != tp->copied_seq) {
+		if ((flags & MSG_PEEK) && peek_seq != tp->copied_seq) { //对比查看序列号
 			if (net_ratelimit())
 				printk(KERN_DEBUG "TCP(%s:%d): Application bug, race in MSG_PEEK.\n",
 				       current->comm, task_pid_nr(current));
-			peek_seq = tp->copied_seq;
+			peek_seq = tp->copied_seq;//记录最后接收的序号
 		}
 		continue;
 
-	found_ok_skb:
+	found_ok_skb://复制接收队列的数据包数据
 		/* Ok so how much can we use? */
-		used = skb->len - offset;
-		if (len < used)
-			used = len;
+		used = skb->len - offset;//计算可复制长度
+		if (len < used)//如果接收长度小于可复制长度
+			used = len;//设置为指定长度
 
 		/* Do we have urgent data here? */
-		if (tp->urg_data) {
-			u32 urg_offset = tp->urg_seq - *seq;
-			if (urg_offset < used) {
-				if (!urg_offset) {
-					if (!sock_flag(sk, SOCK_URGINLINE)) {
-						++*seq;
-						offset++;
-						used--;
-						if (!used)
+		if (tp->urg_data) {//如果有紧急数据
+			u32 urg_offset = tp->urg_seq - *seq;//计算紧急数据偏移位置
+			if (urg_offset < used) {//检查紧急数据偏移位置是否在可复制范围内
+				if (!urg_offset) {//如果紧急数据偏移位置为0
+					if (!sock_flag(sk, SOCK_URGINLINE)) {//如果没有线性要求
+						++*seq;//调整序号值
+						offset++;//调整数据块偏移值
+						used--;//可复制长度减少
+						if (!used)//可复制长度为0,跳转到skip_copy 处
 							goto skip_copy;
 					}
 				} else
-					used = urg_offset;
+					used = urg_offset;//确定紧急数据的复制长度
 			}
 		}
 
-		if (!(flags & MSG_TRUNC)) {
+		if (!(flags & MSG_TRUNC)) {//如果没有设置截断数据标志
 #ifdef CONFIG_NET_DMA
 			if (!tp->ucopy.dma_chan && tp->ucopy.pinned_list)
 				tp->ucopy.dma_chan = get_softnet_dma();
@@ -1552,31 +1559,31 @@ do_prequeue:
 #endif
 			{
 				err = skb_copy_datagram_iovec(skb, offset,
-						msg->msg_iov, used);
-				if (err) {
+						msg->msg_iov, used);//复制数据到缓冲区(服务器程序提供)
+				if (err) {//如果出错,跳出外层循环
 					/* Exception. Bailout! */
-					if (!copied)
+					if (!copied)//设置出错值
 						copied = -EFAULT;
 					break;
 				}
 			}
 		}
 
-		*seq += used;
-		copied += used;
-		len -= used;
+		*seq += used;//调整序号值
+		copied += used;//记录已复制长度
+		len -= used;//减少接收长度
 
-		tcp_rcv_space_adjust(sk);
+		tcp_rcv_space_adjust(sk);//调整 TCP的接收空间值
 
 skip_copy:
-		if (tp->urg_data && after(tp->copied_seq, tp->urg_seq)) {
-			tp->urg_data = 0;
-			tcp_fast_path_check(sk);
+		if (tp->urg_data && after(tp->copied_seq, tp->urg_seq)) {//检查序列号
+			tp->urg_data = 0;//清除紧急数据标志
+			tcp_fast_path_check(sk);//检査乱序包队列 out_of order_queue
 		}
-		if (used + offset < skb->len)
+		if (used + offset < skb->len)//如果可复制长度在数据块范围,继续外层循环
 			continue;
 
-		if (tcp_hdr(skb)->fin)
+		if (tcp_hdr(skb)->fin)//检查FIN标志
 			goto found_fin_ok;
 		if (!(flags & MSG_PEEK)) {
 			sk_eat_skb(sk, skb, copied_early);
@@ -1586,31 +1593,31 @@ skip_copy:
 
 	found_fin_ok:
 		/* Process the FIN. */
-		++*seq;
-		if (!(flags & MSG_PEEK)) {
-			sk_eat_skb(sk, skb, copied_early);
+		++*seq;//递增序列号
+		if (!(flags & MSG_PEEK)) {//如果没有设置查看标志
+			sk_eat_skb(sk, skb, copied_early);//将数据包从接收队列中脱队、释放
 			copied_early = 0;
 		}
 		break;
 	} while (len > 0);
 
-	if (user_recv) {
-		if (!skb_queue_empty(&tp->ucopy.prequeue)) {
+	if (user_recv) {//如果指定了接收进程
+		if (!skb_queue_empty(&tp->ucopy.prequeue)) {//预处理队列不为空
 			int chunk;
 
-			tp->ucopy.len = copied > 0 ? len : 0;
+			tp->ucopy.len = copied > 0 ? len : 0;//设置预处理长度
 
-			tcp_prequeue_process(sk);
-
+			tcp_prequeue_process(sk);//预处理队列的数据包处理函数
+			// 检查已复制长度和可复制长度
 			if (copied > 0 && (chunk = len - tp->ucopy.len) != 0) {
 				NET_ADD_STATS_USER(LINUX_MIB_TCPDIRECTCOPYFROMPREQUEUE, chunk);
-				len -= chunk;
-				copied += chunk;
+				len -= chunk;//调整下一次接收长度
+				copied += chunk;//累加已复制长度
 			}
 		}
 
-		tp->ucopy.task = NULL;
-		tp->ucopy.len = 0;
+		tp->ucopy.task = NULL;//清除预处理进程指针
+		tp->ucopy.len = 0;//清零预处理长度
 	}
 
 #ifdef CONFIG_NET_DMA
@@ -1647,19 +1654,19 @@ skip_copy:
 	 */
 
 	/* Clean up data we have read: This will do ACK frames. */
-	tcp_cleanup_rbuf(sk, copied);
+	tcp_cleanup_rbuf(sk, copied);//检查是否需要更新接收窗口并发送ACK
 
 	TCP_CHECK_TIMER(sk);
-	release_sock(sk);
-	return copied;
+	release_sock(sk);//解锁,处理后备队列的数据包,并唤醒sock锁上的其他进程
+	return copied; //返回复制长度,如果出错就返回出错值
 
-out:
-	TCP_CHECK_TIMER(sk);
+out://退出
+	TCP_CHECK_TIMER(sk);//空语句
 	release_sock(sk);
 	return err;
 
-recv_urg:
-	err = tcp_recv_urg(sk, timeo, msg, len, flags, addr_len);
+recv_urg://接收紧急数据
+	err = tcp_recv_urg(sk, timeo, msg, len, flags, addr_len);//复制紧急数据
 	goto out;
 }
 
@@ -2177,10 +2184,10 @@ int tcp_setsockopt(struct sock *sk, int level, int optname, char __user *optval,
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 
-	if (level != SOL_TCP)
+	if (level != SOL_TCP)//不是设置tcp层选项的，调用icsk_af_ops(icsk_af_ops变量)->setsockopt()表示ip_setsockopt()函数
 		return icsk->icsk_af_ops->setsockopt(sk, level, optname,
 						     optval, optlen);
-	return do_tcp_setsockopt(sk, level, optname, optval, optlen);
+	return do_tcp_setsockopt(sk, level, optname, optval, optlen);//设置TCP选项
 }
 
 #ifdef CONFIG_COMPAT
@@ -2611,7 +2618,12 @@ EXPORT_SYMBOL_GPL(tcp_done);
 
 extern struct tcp_congestion_ops tcp_reno;
 
+//static​​：限制变量作用域为当前文件。
+//__initdata​​：标记该变量仅在内核初始化阶段使用，初始化完成后内存会被释放（通过链接器脚本放置在 .init.data段）。
 static __initdata unsigned long thash_entries;
+//​​__init​​：标记函数为初始化阶段专用，完成后内存释放。
+//​​str​​：指向内核启动参数中 thash_entries=value的 value部分。
+//simple_strtoul​​：将字符串转换为无符号长整型（base=0自动判断进制）。
 static int __init set_thash_entries(char *str)
 {
 	if (!str)
@@ -2648,7 +2660,7 @@ void __init tcp_init(void)
 					0,
 					&tcp_hashinfo.ehash_size,
 					NULL,
-					thash_entries ? 0 : 512 * 1024);
+					thash_entries ? 0 : 512 * 1024);//初始化已链接的hash桶
 	tcp_hashinfo.ehash_size = 1 << tcp_hashinfo.ehash_size;
 	for (i = 0; i < tcp_hashinfo.ehash_size; i++) {
 		INIT_HLIST_HEAD(&tcp_hashinfo.ehash[i].chain);
@@ -2665,7 +2677,7 @@ void __init tcp_init(void)
 					0,
 					&tcp_hashinfo.bhash_size,
 					NULL,
-					64 * 1024);
+					64 * 1024);//申请管理端口哈希队列
 	tcp_hashinfo.bhash_size = 1 << tcp_hashinfo.bhash_size;
 	for (i = 0; i < tcp_hashinfo.bhash_size; i++) {
 		spin_lock_init(&tcp_hashinfo.bhash[i].lock);
@@ -2674,16 +2686,25 @@ void __init tcp_init(void)
 
 	/* Try to be a bit smarter and adjust defaults depending
 	 * on available memory.
+	 在内存充足的系统中扩大连接管理容量，避免资源耗尽；在内存受限的系统中收缩限制，防止内存溢出。
 	 */
+	//计算存储 bhash哈希表所需的内存页数量（order表示连续内存块的阶数）。
+	//(1 << order) << PAGE_SHIFT：计算 2^order页的内存总大小（字节）。
+	//找到最小的 order，使得内存页足够容纳 bhash。
 	for (order = 0; ((1 << order) << PAGE_SHIFT) <
-			(tcp_hashinfo.bhash_size * sizeof(struct inet_bind_hashbucket));
+			(tcp_hashinfo.bhash_size * sizeof(struct inet_bind_hashbucket));//tcp_hashinfo.bhash_size * sizeof(struct inet_bind_hashbucket)：bhash哈希表的总大小。
 			order++)
 		;
-	if (order >= 4) {
-		tcp_death_row.sysctl_max_tw_buckets = 180000;
-		sysctl_tcp_max_orphans = 4096 << (order - 4);
-		sysctl_max_syn_backlog = 1024;
-	} else if (order < 3) {
+	/*
+	​​sysctl_max_tw_buckets​​：最大 TIME_WAIT 套接字数量。
+	sysctl_tcp_max_orphans​​：最大孤儿套接字（无用户引用的套接字）数量。
+	​​sysctl_max_syn_backlog​​：SYN 半连接队列的最大长度。
+	*/
+	if (order >= 4) {//内存充足时，扩展TCP连接管理容量。
+		tcp_death_row.sysctl_max_tw_buckets = 180000;// 增大 TIME_WAIT 容量
+		sysctl_tcp_max_orphans = 4096 << (order - 4);// 孤儿套接字数量随内存扩展
+		sysctl_max_syn_backlog = 1024; // 增大 SYN 队列
+	} else if (order < 3) {//内存受限
 		tcp_death_row.sysctl_max_tw_buckets >>= (3 - order);
 		sysctl_tcp_max_orphans >>= (3 - order);
 		sysctl_max_syn_backlog = 128;
@@ -2697,26 +2718,26 @@ void __init tcp_init(void)
 	limit = min(nr_pages, 1UL<<(28-PAGE_SHIFT)) >> (20-PAGE_SHIFT);
 	limit = (limit * (nr_pages >> (20-PAGE_SHIFT))) >> (PAGE_SHIFT-11);
 	limit = max(limit, 128UL);
-	sysctl_tcp_mem[0] = limit / 4 * 3;
-	sysctl_tcp_mem[1] = limit;
-	sysctl_tcp_mem[2] = sysctl_tcp_mem[0] * 2;
+	sysctl_tcp_mem[0] = limit / 4 * 3;//TCP内存压力阈值。在次内存之下，TCP子系统不担心它的内存需求。
+	sysctl_tcp_mem[1] = limit;//当TCP分配的内存量超过此页数时，TCP将减缓其内存消耗并进入内存压力模式，当内存消耗低于[0]时，该模式将退出。
+	sysctl_tcp_mem[2] = sysctl_tcp_mem[0] * 2;//所有TCP套接字允许排队的页面数。超出则打印Out of socket memory
 
 	/* Set per-socket limits to no more than 1/128 the pressure threshold */
 	limit = ((unsigned long)sysctl_tcp_mem[1]) << (PAGE_SHIFT - 7);
 	max_share = min(4UL*1024*1024, limit);
 
-	sysctl_tcp_wmem[0] = SK_MEM_QUANTUM;
-	sysctl_tcp_wmem[1] = 16*1024;
-	sysctl_tcp_wmem[2] = max(64*1024, max_share);
+	sysctl_tcp_wmem[0] = SK_MEM_QUANTUM;//默认4K,单位字节。为TCP套接字的发送缓冲区保留的内存量。每个TCP套接字由于其诞生的事实而有权使用它。
+	sysctl_tcp_wmem[1] = 16*1024;//16K，自动调整。TCP套接字使用的发送缓冲区的初始大小。此值将覆盖net.core.wmem_default，通常低于net.core.wmem_default。
+	sysctl_tcp_wmem[2] = max(64*1024, max_share);//介于64K和4MB之间，具体取决于RAM大小。TCP套接字的发送缓冲区所允许的最大内存量。此值不会覆盖net.core.wmem_max。使用SO_SNDBUF调用setsockopt()会禁用该套接字的发送缓冲区大小的自动调整，在这种情况下该值将被忽略。
 
-	sysctl_tcp_rmem[0] = SK_MEM_QUANTUM;
-	sysctl_tcp_rmem[1] = 87380;
-	sysctl_tcp_rmem[2] = max(87380, max_share);
+	sysctl_tcp_rmem[0] = SK_MEM_QUANTUM; //默认值4K，单位字节。TCP套接字使用的接收缓冲区的最小大小。即使在中等的内存压力下，它也能保证连接到每个TCP套接字。
+	sysctl_tcp_rmem[1] = 87380;//默认值87380字节，TCP套接字使用的接收缓冲区的初始大小。此值覆盖net.core.rmem默认值。此值将导致窗口为65535，默认设置为tcp_adv_win_scale和tcp_app_win:0，默认设置为tcp_app_win时，窗口会小一些。
+	sysctl_tcp_rmem[2] = max(87380, max_share);//介于87380字节和6MB之间，取决RAM大小。TCP套接字接收器允许接收缓冲区的最大大小，此值不会覆盖net.core.rmem_max。使用SO_RCVBUF调用setsockopt()将禁用该套接字的接收缓冲区大小的自动调整，在这种情况下，将忽略此值。
 
 	printk(KERN_INFO "TCP: Hash tables configured "
 	       "(established %d bind %d)\n",
 	       tcp_hashinfo.ehash_size, tcp_hashinfo.bhash_size);
-
+	//注册拥塞控制算法
 	tcp_register_congestion_control(&tcp_reno);
 }
 

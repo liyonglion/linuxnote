@@ -4297,14 +4297,14 @@ __setup("hashdist=", set_hashdist);
 alloc_large_system_hash()函数从系统的 bootmem空间分配大量的路由表空间。bootmem 空间是内核启动时使用的内存管理策略，主要指内核使用的页面;其意图是从这部分内存中按页进行分配，
 这部分内存页面是不会被 Linux 交换出去或者回收的，一经分配就不再改变了，可见路由表结构的重要性。
  */
-void *__init alloc_large_system_hash(const char *tablename,
-				     unsigned long bucketsize,
-				     unsigned long numentries,
-				     int scale,
-				     int flags,
-				     unsigned int *_hash_shift,
-				     unsigned int *_hash_mask,
-				     unsigned long limit)
+void *__init alloc_large_system_hash(const char *tablename,//哈希表名称（仅调试）
+				     unsigned long bucketsize, //单个桶的大小
+				     unsigned long numentries, //预期条目数
+				     int scale, //缩放因子（调整最终大小）
+				     int flags, //分配标识（NUMA、内存区域）
+				     unsigned int *_hash_shift, //返回hash键右移位数
+				     unsigned int *_hash_mask, //hash掩码
+				     unsigned long limit) //桶数
 {
 	unsigned long long max = limit;
 	unsigned long log2qty, size;

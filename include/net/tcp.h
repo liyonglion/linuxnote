@@ -604,7 +604,7 @@ struct tcp_skb_cb {
  */
 static inline int tcp_skb_pcount(const struct sk_buff *skb)
 {
-	return skb_shinfo(skb)->gso_segs;//分段数据包总数
+	return skb_shinfo(skb)->gso_segs;//分段数据包个数
 }
 
 /* This is valid iff tcp_skb_pcount() > 1. */
@@ -762,6 +762,7 @@ static inline unsigned int tcp_left_out(const struct tcp_sock *tp)
  *	"Packets left network, but not honestly ACKed yet" PLUS
  *	"Packets fast retransmitted"
  */
+/*tcp_packets_in_flight()函数计算处于发送过程的数据包数量,称之为“飞行中的数量”它表示还有多少数据包未被服务器接收仍在网络之中。*/
 static inline unsigned int tcp_packets_in_flight(const struct tcp_sock *tp)
 {
 	return tp->packets_out - tcp_left_out(tp) + tp->retrans_out;
@@ -889,10 +890,17 @@ static inline void tcp_prequeue_init(struct tcp_sock *tp)
 static inline int tcp_prequeue(struct sock *sk, struct sk_buff *skb)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
-
+	//sysctl_tcp_low_latency(/proc/net/ipv4/tcp_low_latency)系统参数的含义是
+	//“是否启动tcp低时延”，如果启用则为1，否则为0(默认)
+	//tp->ucopy.task不为空，表示有进程正阻塞到该套接字上等待数据可用，所以，下面这两
+	//个条件表示没有启动TCP低时延并且当前有进程在等待数据时，则把数据包放入prequeue队列
+    //为什么放入prequeue队列就增加了tcp时延也非常好理解，因为放入prequeue队列的数据
+	//包实际上会被延迟处理，也就会延迟给对端回复ACK，所以增加了时延
 	if (!sysctl_tcp_low_latency && tp->ucopy.task) {//在未启用tcp_low_latency且有用户进程在读取数据的情况下，skb入队到prequeue
 		__skb_queue_tail(&tp->ucopy.prequeue, skb);//链入到预处理队列尾部
 		tp->ucopy.memory += skb->truesize;//递增数据包长度计数
+		//为了防止prequeue队列无线增大，这里设置了门限，超过了该门限，
+		//则直接在这里处理prequeue队列中的数据包
 		if (tp->ucopy.memory > sk->sk_rcvbuf) {//超过了接收缓存区的长度
 			struct sk_buff *skb1;
 
@@ -905,6 +913,8 @@ static inline int tcp_prequeue(struct sock *sk, struct sk_buff *skb)
 
 			tp->ucopy.memory = 0;//清零数据包长度计数
 		} else if (skb_queue_len(&tp->ucopy.prequeue) == 1) {//如果只有一个数据包
+			//这里是另外一种情况，当prequeue队列由空变为不空时，唤醒等待进程，
+			//让等待进程有机会快速处理prequeue队列
 			wake_up_interruptible(sk->sk_sleep);//唤醒sock结构中的等待进程;
 			if (!inet_csk_ack_scheduled(sk))//检查是否需要ACK
 				inet_csk_reset_xmit_timer(sk, ICSK_TIME_DACK,
@@ -1212,9 +1222,9 @@ static inline struct sk_buff *tcp_send_head(struct sock *sk)
 
 static inline void tcp_advance_send_head(struct sock *sk, struct sk_buff *skb)
 {
-	sk->sk_send_head = skb->next;
-	if (sk->sk_send_head == (struct sk_buff *)&sk->sk_write_queue)
-		sk->sk_send_head = NULL;
+	sk->sk_send_head = skb->next;//发送头指向下一个数据包
+	if (sk->sk_send_head == (struct sk_buff *)&sk->sk_write_queue)//如果发送队列已空
+		sk->sk_send_head = NULL;//清空发送头
 }
 
 static inline void tcp_check_send_head(struct sock *sk, struct sk_buff *skb_unlinked)
@@ -1230,19 +1240,19 @@ static inline void tcp_init_send_head(struct sock *sk)
 
 static inline void __tcp_add_write_queue_tail(struct sock *sk, struct sk_buff *skb)
 {
-	__skb_queue_tail(&sk->sk_write_queue, skb);
+	__skb_queue_tail(&sk->sk_write_queue, skb);//链入发送队列尾部
 }
 
 static inline void tcp_add_write_queue_tail(struct sock *sk, struct sk_buff *skb)
 {
-	__tcp_add_write_queue_tail(sk, skb);
+	__tcp_add_write_queue_tail(sk, skb);//将数据包链人sock结构中的发送队列尾部
 
 	/* Queue it, remembering where we must start sending. */
-	if (sk->sk_send_head == NULL) {
-		sk->sk_send_head = skb;
+	if (sk->sk_send_head == NULL) {//如果发送头为空
+		sk->sk_send_head = skb;//发送头指向数据包，急需发送
 
 		if (tcp_sk(sk)->highest_sack == NULL)
-			tcp_sk(sk)->highest_sack = skb;
+			tcp_sk(sk)->highest_sack = skb;//也记录到tcp_sock结构中
 	}
 }
 

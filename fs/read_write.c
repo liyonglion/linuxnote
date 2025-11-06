@@ -232,24 +232,24 @@ static void wait_on_retry_sync_kiocb(struct kiocb *iocb)
 
 ssize_t do_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
-	struct iovec iov = { .iov_base = buf, .iov_len = len };
-	struct kiocb kiocb;
+	struct iovec iov = { .iov_base = buf, .iov_len = len };//记录服务器程序提供的接收地址和长度,建立I/0缓冲区
+	struct kiocb kiocb;//IO请求结构
 	ssize_t ret;
 
-	init_sync_kiocb(&kiocb, filp);
-	kiocb.ki_pos = *ppos;
-	kiocb.ki_left = len;
+	init_sync_kiocb(&kiocb, filp);//初始化IO请求结构
+	kiocb.ki_pos = *ppos;//记录缓冲区的偏移位置(存放数据的开始位置)
+	kiocb.ki_left = len;//记录接收数据长度
 
 	for (;;) {
-		ret = filp->f_op->aio_read(&kiocb, &iov, 1, kiocb.ki_pos);
-		if (ret != -EIOCBRETRY)
+		ret = filp->f_op->aio_read(&kiocb, &iov, 1, kiocb.ki_pos);//调用文件函数表的aio_read(),sock对应：sock_aio_read()
+		if (ret != -EIOCBRETRY)//不需要重试就跳出
 			break;
-		wait_on_retry_sync_kiocb(&kiocb);
+		wait_on_retry_sync_kiocb(&kiocb);//睡眠等待 IO请求完成
 	}
 
 	if (-EIOCBQUEUED == ret)
-		ret = wait_on_sync_kiocb(&kiocb);
-	*ppos = kiocb.ki_pos;
+		ret = wait_on_sync_kiocb(&kiocb);//睡眠等待 IO请求完成
+	*ppos = kiocb.ki_pos;//记录当前存放位置
 	return ret;
 }
 
@@ -269,10 +269,10 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	ret = rw_verify_area(READ, file, pos, count);
 	if (ret >= 0) {
 		count = ret;
-		if (file->f_op->read)
-			ret = file->f_op->read(file, buf, count, pos);
-		else
-			ret = do_sync_read(file, buf, count, pos);
+		if (file->f_op->read)//如果文件函数表提供了read()函数
+			ret = file->f_op->read(file, buf, count, pos);//调用它的 read()函数
+		else//如果它没有提供read()函数
+			ret = do_sync_read(file, buf, count, pos);//调用它的 aio_read()函数
 		if (ret > 0) {
 			fsnotify_access(file->f_path.dentry);
 			add_rchar(current, ret);
