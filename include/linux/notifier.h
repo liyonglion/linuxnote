@@ -45,6 +45,7 @@
  * often but notifier_blocks will seldom be removed.  Also, SRCU notifier
  * chains are slightly more difficult to use because they require special
  * runtime initialization.
+ * 通知连常见名称有：xxx_chain、xxx_notifier_chain以及xxx_notifier_list
  */
 
 struct notifier_block {

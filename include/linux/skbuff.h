@@ -289,18 +289,18 @@ struct sk_buff {
 			__u16	csum_offset; //校验和保存到csumstart 中的位置
 		};
 	};
-	__u32			priority; //数据包在队列中的优先级
+	__u32			priority; //传输或者转发的封包QOS等级。如果封包由本地产生，套接字层定义优先级的值。相反，如果此封包正被转发，则函数rt_tos2priority(由ip_forward调用)会根据IP报头本身的TOS字段值定义此字段的值
 	__u8			local_df:1, //是否允许本地数据分段
-				cloned:1, //是否允许复制
+				cloned:1, //标识该结构体是另外一个sk_buff缓冲区的克隆
 				ip_summed:2, //IP检验和标志位
 				nohdr:1, //运载时使用，表示不能修改头部
 				nfctinfo:3; //数据包连接关系
-	__u8			pkt_type:3,//数据包类型
+	__u8			pkt_type:3,//此字段会根据帧的L2目的地址进行类型划分。可能取值在于include/linux/if_packet.h中。对于Ethernet设备而言，此参数由函数eth_ype_trans进行初始化。PACKET_HOST：数据包是发给本机的数据包。PACKET_BROADCAST：数据包是广播数据包。PACKET_MULTICAST：数据包是组播数据包。PACKET_OTHERHOST：数据包是发给其他主机的数据包。PACKET_USER：数据包是用户数据包。PACKET_KERNEL：数据包是内核数据包。
 				fclone:2, //数据包克隆状态
 				ipvs_property:1, //数据包所属的 ipvs
 				peeked:1, //数据包是否处于操作状态
 				nf_trace:1; //netfilter 对数据包的跟踪标志
-	__be16			protocol; //底层驱动使用的数据包协议
+	__be16			protocol; //从L2层的设备驱动来看，就是用在下一个较高层的协议。典型协议有：IP、IPV6、ARP。由于每种协议都有自己的函数处理输入的封包，因此驱动程序使用这个字段通知上层该使用哪个处理函数，所以，在该函数被调用之前protocol字段必须初始化。
 
 	void			(*destructor)(struct sk_buff *skb); //销毁数据包的函数。当一个缓冲区不属于一个套接字时，destructor通常不会被初始化。当此缓冲区属于一个套接字时，通常设置成sock_rfree或sock_wfree
 #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
@@ -532,6 +532,7 @@ static inline void skb_header_release(struct sk_buff *skb)
  *
  *	Returns true if more than one person has a reference to this
  *	buffer.
+ 是否可共享。共享时可以克隆该缓冲区
  */
 static inline int skb_shared(const struct sk_buff *skb)
 {
@@ -655,6 +656,7 @@ static inline __u32 skb_queue_len(const struct sk_buff_head *list_)
  * than the networking core (in softirq only). In the long run either the
  * network layer or drivers should need annotation to consolidate the
  * main types of usage into 3 classes.
+ * 初始化sk_buff队列
  */
 static inline void skb_queue_head_init(struct sk_buff_head *list)
 {
@@ -724,6 +726,7 @@ static inline void __skb_queue_before(struct sk_buff_head *list,
  *	and you must therefore hold required locks before calling it.
  *
  *	A buffer cannot be placed on two lists at the same time.
+ 将skb添加到队列的头
  */
 extern void skb_queue_head(struct sk_buff_head *list, struct sk_buff *newsk);
 static inline void __skb_queue_head(struct sk_buff_head *list,
@@ -741,6 +744,7 @@ static inline void __skb_queue_head(struct sk_buff_head *list,
  *	and you must therefore hold required locks before calling it.
  *
  *	A buffer cannot be placed on two lists at the same time.
+ skb添加到队列的尾部
  */
 extern void skb_queue_tail(struct sk_buff_head *list, struct sk_buff *newsk);
 static inline void __skb_queue_tail(struct sk_buff_head *list,
@@ -773,6 +777,7 @@ static inline void __skb_unlink(struct sk_buff *skb, struct sk_buff_head *list)
  *	Remove the head of the list. This function does not take any locks
  *	so must be used with appropriate locks held only. The head item is
  *	returned or %NULL if the list is empty.
+ 从队列头中移除一个skb，并返回
  */
 extern struct sk_buff *skb_dequeue(struct sk_buff_head *list);
 static inline struct sk_buff *__skb_dequeue(struct sk_buff_head *list)
@@ -790,6 +795,7 @@ static inline struct sk_buff *__skb_dequeue(struct sk_buff_head *list)
  *	Remove the tail of the list. This function does not take any locks
  *	so must be used with appropriate locks held only. The tail item is
  *	returned or %NULL if the list is empty.
+ 从队列的尾部移除一个skb，并返回
  */
 extern struct sk_buff *skb_dequeue_tail(struct sk_buff_head *list);
 static inline struct sk_buff *__skb_dequeue_tail(struct sk_buff_head *list)
@@ -1191,6 +1197,7 @@ static inline void skb_orphan(struct sk_buff *skb)
  *	Delete all buffers on an &sk_buff list. Each buffer is removed from
  *	the list and one reference dropped. This function does not take the
  *	list lock and the caller must hold the relevant locks to use it.
+ 把队列变为空队列
  */
 extern void skb_queue_purge(struct sk_buff_head *list);
 static inline void __skb_queue_purge(struct sk_buff_head *list)
@@ -1369,6 +1376,7 @@ static inline int __skb_linearize(struct sk_buff *skb)
  *
  *	If there is no free memory -ENOMEM is returned, otherwise zero
  *	is returned and the old skb data released.
+ 将几个分片和并成一个缓冲区，合并会引发数据拷贝，会使性能下降
  */
 static inline int skb_linearize(struct sk_buff *skb)
 {
@@ -1425,7 +1433,7 @@ static inline int pskb_trim_rcsum(struct sk_buff *skb, unsigned int len)
 		skb->ip_summed = CHECKSUM_NONE;
 	return __pskb_trim(skb, len);
 }
-
+//一次循环队列中的每个skb
 #define skb_queue_walk(queue, skb) \
 		for (skb = (queue)->next;					\
 		     prefetch(skb->next), (skb != (struct sk_buff *)(queue));	\

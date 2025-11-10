@@ -507,7 +507,7 @@ int sparc_floppy_request_irq(int irq, unsigned long flags,
 EXPORT_SYMBOL(sparc_floppy_request_irq);
 
 #endif
-
+//注册硬中断。irq 为中断号，flags为中断属性，devname为设备名，dev_id为设备ID
 int request_irq(unsigned int irq,
 		irq_handler_t handler,
 		unsigned long irqflags, const char * devname, void *dev_id)

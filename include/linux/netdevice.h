@@ -298,7 +298,7 @@ enum netdev_state_t
  * are then used in the device probing. 
  */
 struct netdev_boot_setup {
-	char name[IFNAMSIZ];
+	char name[IFNAMSIZ]; //设备名称
 	struct ifmap map;
 };
 #define NETDEV_BOOT_SETUP_MAX 8
@@ -457,6 +457,14 @@ static inline void napi_synchronize(const struct napi_struct *n)
  *
  *	FIXME: cleanup struct net_device such that network protocol info
  *	moves out.
+ 存储这特定网络设备的所有信息。每个设备都一个这种结构，无论是真实设备还是虚拟设备。
+ 所有的设备的net_device结构放在一个由全局变量dev_base所指的全局列表中。虽然对同一种类型的所有设备而言，net_device结构的某些字段会设置成相同的值，但是有些字段则必须
+ 由每种设备模型做不同的设置。因此，对几乎所有的类型而言，Linux都提供了一个通用的函数，可以对一些参数做初始化，使其在所有模型之间都一样。除了针对其模型设置那些具体特定值外，
+ 每个设备驱动程序都会启用此函数。驱动程序还可以改写一些已由内核初始化的字段。
+ 几乎所有的设备(包括NIC)都采用以下两种方式之一与内核交互：
+ 	轮询(polling): 由内核端驱动。内核定期检查设备状态，以了解其是否发生了什么事情。
+	中断: 由设备驱动。当个设备需要内核注意时，回想内核发送一个硬件信号(产生中断事件)
+Linux结合中断和轮询来提高性能： 中断放在会触发软中断，在软中断调用polling来获取包
  */
 
 struct net_device
@@ -466,29 +474,31 @@ struct net_device
 	 * This is the first field of the "visible" part of this structure
 	 * (i.e. as seen by users in the "Space.c" file).  It is the name
 	 * the interface.
+	 * 设备名称（例如，eth0）
 	 */
 	char			name[IFNAMSIZ];
 	/* device name hash chain */
-	struct hlist_node	name_hlist;
+	struct hlist_node	name_hlist; //把net_device结构链接至name hash表中
 
 	/*
 	 *	I/O specific fields
 	 *	FIXME: Merge these and struct ifmap into one
+	 这些字段描述设备所用的共享内存，用于设备与内核沟通。其初始化和访问只会在设备驱动程序内进行，较高分层不需要关心这些字段
 	 */
 	unsigned long		mem_end;	/* shared mem end	*/
 	unsigned long		mem_start;	/* shared mem start	*/
-	unsigned long		base_addr;	/* device I/O address	*/
-	unsigned int		irq;		/* device IRQ number	*/
+	unsigned long		base_addr;	/* device I/O address	设备自有内存映射到I/O内存的起始地址*/
+	unsigned int		irq;		/* device IRQ number	设备用于内核对话的中断编号，此值可由多个设备共享。驱动程序使用request_irq()函数分配此变量，使用free_irq()释放此变量*/
 
 	/*
 	 *	Some hardware also needs these fields, but they are not
 	 *	part of the usual set specified in Space.c.
 	 */
 
-	unsigned char		if_port;	/* Selectable AUI, TP,..*/
-	unsigned char		dma;		/* DMA channel		*/
+	unsigned char		if_port;	/* Selectable AUI, TP,..接口所使用的端口类型*/
+	unsigned char		dma;		/* DMA channel	设备所使用的DMA通道	*/
 
-	unsigned long		state;
+	unsigned long		state; 
 
 	struct list_head	dev_list;
 #ifdef CONFIG_NETPOLL
@@ -496,11 +506,12 @@ struct net_device
 #endif
 	
 	/* The device initialization function. Called only once. */
-	int			(*init)(struct net_device *dev);
+	int			(*init)(struct net_device *dev);//初始化一个设备
 
 	/* ------- Fields preinitialized in Space.c finish here ------- */
 
-	/* Net device features */
+	/* Net device features 用于存储设备的支持的一些功能。该字段可报告网卡的功能，以便与cpu通信，如适配卡能否对高端内存做DMA或者硬件能否对所有封包做校验和工作。此参数由设备驱动程序初始化
+	可以在net_device数据结构定义中找到NETIF_F_XXXX特征功能列表 */
 	unsigned long		features;
 #define NETIF_F_SG		1	/* Scatter/gather IO. */
 #define NETIF_F_IP_CSUM		2	/* Can checksum TCP/UDP over IPv4. */
@@ -541,11 +552,11 @@ struct net_device
 	struct net_device	*next_sched;
 
 	/* Interface index. Unique device identifier	*/
-	int			ifindex;
-	int			iflink;
+	int			ifindex; //独一无二的ID，当设备以dev_new_index注册时分派给每个设备
+	int			iflink; //这个字段主要是由（虚拟）隧道设备使用，可用于标识抵达隧道另外一端的真实设备
 
 
-	struct net_device_stats* (*get_stats)(struct net_device *dev);
+	struct net_device_stats* (*get_stats)(struct net_device *dev); //设备驱动程序所收集的一些统计数据，可以使用用户空间程序予以显示，如ifconfig 和 ip
 	struct net_device_stats	stats;
 
 #ifdef CONFIG_WIRELESS_EXT
@@ -555,7 +566,7 @@ struct net_device
 	/* Instance data managed by the core of Wireless Extensions. */
 	struct iw_public_data *	wireless_data;
 #endif
-	const struct ethtool_ops *ethtool_ops;
+	const struct ethtool_ops *ethtool_ops;//指向一组函数指针的指针，用于设置或取出不同设备参数的配置。
 
 	/* Hardware header description */
 	const struct header_ops *header_ops;
@@ -566,18 +577,21 @@ struct net_device
 	 * will (read: may be cleaned up at will).
 	 */
 
-
+	/*
+		flags字段中的某些位代表网络设备的功能(如IFF_MULTICAST),而其他位代表状态的改变(IFF_UP或IFF_RUNNING)。此设备驱动程序通常会在初始化期间设置这些功能，这些
+		状态标识由内核管理。这些标识的设置可以通过ifconfig命令查看。例如输出中：UP LOOPBACK RUNNING 相当于IFF_UP、IFF_LOOPBACK、IFF_RUNNING
+	*/
 	unsigned int		flags;	/* interface flags (a la BSD)	*/
-	unsigned short		gflags;
-        unsigned short          priv_flags; /* Like 'flags' but invisible to userspace. */
+	unsigned short		gflags; //几乎不再使用了，由于兼容性的原因存在
+        unsigned short          priv_flags; /* Like 'flags' but invisible to userspace. 用于存储用户空间不可见标识。目前而言，此字段由Vlan和Bridge虚拟设备使用 */
 	unsigned short		padded;	/* How much padding added by alloc_netdev() */
 
 	unsigned char		operstate; /* RFC2863 operstate */
 	unsigned char		link_mode; /* mapping policy to operstate */
 
-	unsigned		mtu;	/* interface MTU value		*/
-	unsigned short		type;	/* interface hardware type	*/
-	unsigned short		hard_header_len;	/* hardware hdr length	*/
+	unsigned		mtu;	/* interface MTU value	设备能处理的帧的最大尺寸	*/
+	unsigned short		type;	/* interface hardware type	设备所属的类型(Ethernet、Frame Relay、Loopback、PPP、ATM、FDDI、X25、Loopback、Other)。在include/linux/if_arp.h包含可能类型的完整列表*/
+	unsigned short		hard_header_len;	/* hardware hdr length	以字节为单位的设备头大小。例如 Ethernet报头大小14字节。每个设备头的长度定义在该设备的头文件中。例如，对于Ethernet而言，ETH_HLEN定义在<include/linux/if_ether.h>中*/
 
 	/* extra head- and tailroom the hardware may need, but not in all cases
 	 * can this be guaranteed, especially tailroom. Some cases also use
@@ -586,26 +600,29 @@ struct net_device
 	unsigned short		needed_headroom;
 	unsigned short		needed_tailroom;
 
-	struct net_device	*master; /* Pointer to master device of a group,
+	struct net_device	*master; /* Pointer to master device of a group, 有些协议允许一组设备集群起来作为单一设备。群组中的一个设备会被选定为所谓的主设备，扮演特殊角色。如果此接口非群组成员之一，则指向NULL
 					  * which this device is member of.
 					  */
 
 	/* Interface address info. */
 	unsigned char		perm_addr[MAX_ADDR_LEN]; /* permanent hw address */
 	unsigned char		addr_len;	/* hardware address length	*/
-	unsigned short          dev_id;		/* for shared network cards */
+	unsigned short          dev_id;		/* for shared network cards 此字段用于区分可由不同OS同时共享的同一种设备的诸多虚拟实例 */
 
 	struct dev_addr_list	*uc_list;	/* Secondary unicast mac addresses */
 	int			uc_count;	/* Number of installed ucasts	*/
 	int			uc_promisc;
-	struct dev_addr_list	*mc_list;	/* Multicast mac addresses	*/
-	int			mc_count;	/* Number of installed mcasts	*/
-	int			promiscuity;
+	struct dev_addr_list	*mc_list;	/* Multicast mac addresses	指向此设备的dev_mc_list结构列表头的指针*/
+	int			mc_count;	/* Number of installed mcasts	设备多播地址条数*/
+	int			promiscuity; //混杂模式。采用计数器而非简单的标识的主要原因在于，多个客户程序可能都会要求混杂模式。因此，进入混杂模式时递增该计数器，退出时递减计数器。除非计数器为0，否则该设备不会退出混杂模式。当该值非0，flags的IFF_PROMISC标识也会被设置
 	int			allmulti;
 
 
 	/* Protocol specific pointers */
-	
+	/*
+		这6个字段都是指针，指向特定协议专用的数据结构，每个数据结构都包含一些该协议私有的参数。例如，ip_ptr指向一个类型为in_device的数据结构，其中包含各种不同的与IPv4相关的参数，
+		其中又该接口上的所配置的IP地址列表。
+	*/
 	void 			*atalk_ptr;	/* AppleTalk link 	*/
 	void			*ip_ptr;	/* IPv4 specific data	*/  
 	void                    *dn_ptr;        /* DECnet specific data */
@@ -618,12 +635,12 @@ struct net_device
 /*
  * Cache line mostly used on receive path (including eth_type_trans())
  */
-	unsigned long		last_rx;	/* Time of last Rx	*/
+	unsigned long		last_rx;	/* Time of last Rx	最后一个封包达到的时间，以jiffies测量。没有任何特殊目的，但又需要时可以利用*/
 	/* Interface address info used in eth_type_trans() */
 	unsigned char		dev_addr[MAX_ADDR_LEN];	/* hw address, (before bcast 
-							because most packets are unicast) */
+							because most packets are unicast) 链路层地址，不要将其与L3或者IP地址混淆。地址长度由addr_len字段指定。Ethernet地址长度是6字节长*/
 
-	unsigned char		broadcast[MAX_ADDR_LEN];	/* hw bcast add	*/
+	unsigned char		broadcast[MAX_ADDR_LEN];	/* hw bcast add	链路层广播地址*/
 
 	/* ingress path synchronizer */
 	spinlock_t		ingress_lock;
@@ -651,11 +668,15 @@ struct net_device
 	   if nobody entered there.
 	 */
 	int			xmit_lock_owner;
+	/*
+		net_device 结构没有提供一个用来记录统计数据的收集字段，二十引入了一个由驱动程序设置的priv指针，指向一个存储在相关接口信息的私有数据结构中。私有数据由统计数据组成，如已收发的封包数目，
+		以及已经发生的错误数目。几乎所有的结构体都包含一个类型为net_device_stats的字段，该字段包含所有网络设备的共有的统计数据，而且可以通过get_stats方法获取
+	*/
 	void			*priv;	/* pointer to private data	*/
 	int			(*hard_start_xmit) (struct sk_buff *skb,
-						    struct net_device *dev);//网卡发送函数
+						    struct net_device *dev);//网卡发送函数,用于传输一个帧
 	/* These may be needed for future network-power-down code. */
-	unsigned long		trans_start;	/* Time (in jiffies) of last Tx	*/
+	unsigned long		trans_start;	/* Time (in jiffies) of last Tx	 最近的一个帧传输启动时间(以jiffies测量).设备驱动程序会在传输前设置此值。如果在一段给定时间后传输没有完成，这个字段用于监测适配网卡的问题。传输时间长意味着有地方出错，此时驱动程序通常复位网卡*/
 
 	int			watchdog_timeo; /* used by dev_watchdog() */
 	struct timer_list	watchdog_timer;
@@ -669,7 +690,7 @@ struct net_device
 	/* delayed register/unregister */
 	struct list_head	todo_list;
 	/* device index hash chain */
-	struct hlist_node	index_hlist;
+	struct hlist_node	index_hlist; //把设备加入索引hash表中
 
 	struct net_device	*link_watch_next;
 
@@ -679,16 +700,16 @@ struct net_device
 	       NETREG_UNREGISTERING,	/* called unregister_netdevice */
 	       NETREG_UNREGISTERED,	/* completed unregister todo */
 	       NETREG_RELEASED,		/* called free_netdev */
-	} reg_state;
+	} reg_state; //设备注册状态
 
 	/* Called after device is detached from network. */
-	void			(*uninit)(struct net_device *dev);
+	void			(*uninit)(struct net_device *dev); //清理一个设备
 	/* Called after last user reference disappears. */
-	void			(*destructor)(struct net_device *dev);
+	void			(*destructor)(struct net_device *dev);//销毁一个设备
 
 	/* Pointers to interface service routines.	*/
-	int			(*open)(struct net_device *dev);
-	int			(*stop)(struct net_device *dev);
+	int			(*open)(struct net_device *dev); //开启一个设备
+	int			(*stop)(struct net_device *dev); //关闭一个设备
 #define HAVE_NETDEV_POLL
 #define HAVE_CHANGE_RX_FLAGS
 	void			(*change_rx_flags)(struct net_device *dev,
@@ -696,10 +717,10 @@ struct net_device
 #define HAVE_SET_RX_MODE
 	void			(*set_rx_mode)(struct net_device *dev);
 #define HAVE_MULTICAST			 
-	void			(*set_multicast_list)(struct net_device *dev);
+	void			(*set_multicast_list)(struct net_device *dev); 
 #define HAVE_SET_MAC_ADDR  		 
 	int			(*set_mac_address)(struct net_device *dev,
-						   void *addr);
+						   void *addr);//改变设备的MAC地址。设备没有提供此功能时(如同Bridge虚拟设备的情况)就会设置成NUll
 #define HAVE_VALIDATE_ADDR
 	int			(*validate_addr)(struct net_device *dev);
 #define HAVE_PRIVATE_IOCTL
@@ -707,12 +728,12 @@ struct net_device
 					    struct ifreq *ifr, int cmd);
 #define HAVE_SET_CONFIG
 	int			(*set_config)(struct net_device *dev,
-					      struct ifmap *map);
+					      struct ifmap *map);//配置驱动程序参数，如硬件参数irq、io_addr以及if_port。
 #define HAVE_CHANGE_MTU
-	int			(*change_mtu)(struct net_device *dev, int new_mtu);
+	int			(*change_mtu)(struct net_device *dev, int new_mtu); //改变设备MTU值
 
 #define HAVE_TX_TIMEOUT
-	void			(*tx_timeout) (struct net_device *dev);
+	void			(*tx_timeout) (struct net_device *dev); //在看门狗定时器到期时调用此方法，用于确认该次传送是否花了一段很可疑的长时间才完成。
 
 	void			(*vlan_rx_register)(struct net_device *dev,
 						    struct vlan_group *grp);
@@ -737,7 +758,7 @@ struct net_device
 	/* mid-layer private */
 	void			*ml_priv;
 
-	/* bridge stuff */
+	/* bridge stuff 当此设备配置生成桥接端口时，就需要额外的信息*/
 	struct net_bridge_port	*br_port;
 	/* macvlan */
 	struct macvlan_port	*macvlan_port;

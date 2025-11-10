@@ -58,12 +58,12 @@
 typedef irqreturn_t (*irq_handler_t)(int, void *);
 
 struct irqaction {
-	irq_handler_t handler;
-	unsigned long flags;
+	irq_handler_t handler;//由设备驱动程序提供，用以处理中断的通知信息：每当内核接收到irq中断事件时，就调用此函数。
+	unsigned long flags; //一组标识。可能取值SA_XXX定义在include/asm-xxxx/signal.h中。例如SA_SHIRQ: 设备驱动程序可以处理共享IRQ
 	cpumask_t mask;
-	const char *name;
-	void *dev_id;
-	struct irqaction *next;
+	const char *name; //设备名称
+	void *dev_id; //此设备相关联的net_device数据结构的指针。声明为void* 的原因时，不仅仅只有NIC设备使用IRQ，因此，这里使用通用的类型声明
+	struct irqaction *next; //所有共享同一个IRQ编号的设备会用此指针链接成一个列表
 	int irq;
 	struct proc_dir_entry *dir;
 };

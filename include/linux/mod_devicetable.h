@@ -13,12 +13,14 @@ typedef unsigned long kernel_ulong_t;
 #endif
 
 #define PCI_ANY_ID (~0)
-
+//PCI 设备独一无二的识别方式是通过一些参数的组合，包括开发商以及模型。
+//每个设备的驱动程序都会把一个pci_device_id 实例的向量注册到内核，这个实例向量列出了其所能处理的设备ID
+//PCI设备驱动调用pci_register_deiver和pci_unregister_driver函数来注册和注销
 struct pci_device_id {
-	__u32 vendor, device;		/* Vendor and device ID or PCI_ANY_ID*/
+	__u32 vendor, device;		/* Vendor and device ID or PCI_ANY_ID 这两个通常足以识别设备*/
 	__u32 subvendor, subdevice;	/* Subsystem ID's or PCI_ANY_ID */
-	__u32 class, class_mask;	/* (class,subclass,prog-if) triplet */
-	kernel_ulong_t driver_data;	/* Data private to the driver */
+	__u32 class, class_mask;	/* (class,subclass,prog-if) triplet 代表设备所属的类*/
+	kernel_ulong_t driver_data;	/* Data private to the driver 不是PCI ID的一部分，而是由设备驱动程序所使用的一个私有参数*/
 };
 
 

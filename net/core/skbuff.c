@@ -276,6 +276,8 @@ struct sk_buff *__netdev_alloc_skb(struct net_device *dev,
  *
  *	%NULL is returned if there is no free memory. Although this function
  *	allocates memory it can be called from an interrupt.
+ 该函数是由设备驱动程序使用的缓冲区分配函数，而且应该是在中断模式中执行。此函数只是一个包裹alloc_skb的函数，为了优化的原因是在申请大小上增加了16个字节。而且因为此函数是由中断事件处理
+ 函数调用，所以会要求原子操作(GFP_ATOMIC)
  */
 struct sk_buff *dev_alloc_skb(unsigned int length)
 {
@@ -523,6 +525,9 @@ EXPORT_SYMBOL_GPL(skb_morph);
  *
  *	If this function is called from an interrupt gfp_mask() must be
  *	%GFP_ATOMIC.
+ 当同一个缓冲区需要由不同消费者个别处理时，那些消费者可能需要修改sk_buff的内容(指向不同的报头)，内核不需要完全拷贝sk_buff结构和相关联的数据缓冲区。
+ 相反，为了提高效率，内核可以克隆原始值，也就是只拷贝sk_buff结构，然后增加引用计数，以免过早释放共享的数据块。
+ sk_buff的克隆没有链接到任何表(list)，而且也没有引用套接字的拥有者。skb->cloned字段在克隆的和原有的缓冲区内都置为1.而克隆的skb->users也置为1，使得第一次尝试删除就能成功，但是对数据的缓冲区引用数目则会递增
  */
 
 struct sk_buff *skb_clone(struct sk_buff *skb, gfp_t gfp_mask)
@@ -582,6 +587,7 @@ static void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
  *	to modify all the data of returned buffer. This means that this
  *	function is not recommended for use in circumstances when only
  *	header is going to be modified. Use pskb_copy() instead.
+ 完全拷贝一个skb,包括数据部分
  */
 
 struct sk_buff *skb_copy(const struct sk_buff *skb, gfp_t gfp_mask)
@@ -623,6 +629,7 @@ struct sk_buff *skb_copy(const struct sk_buff *skb, gfp_t gfp_mask)
  *	private copy of the header to alter. Returns %NULL on failure
  *	or the pointer to the buffer on success.
  *	The returned buffer has a reference count of 1.
+ 只拷贝head到end之间的数据以及skb_shared_info，但是skb_shared_info中的frags是共享的
  */
 
 struct sk_buff *pskb_copy(struct sk_buff *skb, gfp_t gfp_mask)

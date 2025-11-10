@@ -471,6 +471,7 @@ static int netdev_boot_setup_add(char *name, struct ifmap *map)
  *	The found settings are set for the device to be used
  *	later in the device probing.
  *	Returns 0 if no settings found, 1 if they are.
+ 引导阶段结束后，网络代码使用netdev_boot_setup_check()函数给定接口是否与引导期间的配置相关联。
  */
 int netdev_boot_setup_check(struct net_device *dev)
 {
@@ -524,6 +525,9 @@ unsigned long netdev_boot_base(const char *prefix, int unit)
 
 /*
  * Saves at boot time configured settings for any netdevice.
+ ether=和netdev=关键字都注册使用同一个处理函数netdev_boot_setup。当此处理函数被启动处理函数入参时，就会把结果存储在netdev_boot_setup的数据结构内，处理函数和数据结构类型恰巧共享同一个名称，需要注意别混淆两者
+ 下面函数功能： 就是将字符串中抽取输入参数，填入一个ifmap结构，然后用netdev_boot_setup_add把ifmap结构添加到dev_boot_setup数组中。
+ 引导结束后，所有注册的网络设备的配置信息都保存在dev_boot_setup数组中。
  */
 int __init netdev_boot_setup(char *str)
 {
@@ -537,9 +541,9 @@ int __init netdev_boot_setup(char *str)
 	/* Save settings */
 	memset(&map, 0, sizeof(map));
 	if (ints[0] > 0)
-		map.irq = ints[1];
+		map.irq = ints[1];//中断号
 	if (ints[0] > 1)
-		map.base_addr = ints[2];
+		map.base_addr = ints[2]; //
 	if (ints[0] > 2)
 		map.mem_start = ints[3];
 	if (ints[0] > 3)

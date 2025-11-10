@@ -163,6 +163,7 @@ extern void (*late_time_init)(void);
  *
  * The `id' arg to __define_initcall() is needed so that multiple initcalls
  * can point at the same handler without causing duplicate-symbol build errors.
+ * Linux 内核使用各种不同的宏为函数和数据结构标记特殊属性。这些宏会通过链接器把带有共同属性的代码或数据结构放到特定专用的内存区域。如此一来，内核就会用简单的方式轻易管好全部具有共同属性的对象类。
  */
 
 #define __define_initcall(level,fn,id) \
@@ -227,12 +228,21 @@ struct obs_kernel_param {
 
 #define __setup_null_param(str, unique_id)			\
 	__setup_param(str, unique_id, NULL, 0)
-
+/*
+str 是关键字，而fn是相关联的处理函数。指示内核当输入的引导期间字符串中包括str时，就执行fn。str必须以=字符串结束，以使parse_args的解析能轻松一点。任何跟在=之后的文本都将作为输入传递给fn。
+传递给__setup的输入函数会被放入到.init.setup内存节区中
+*/
 #define __setup(str, fn)					\
 	__setup_param(str, fn, fn, 0)
 
 /* NOTE: fn is as per module_param, not __setup!  Emits warning if fn
- * returns non-zero. */
+ * returns non-zero.
+ 内核引导期内，有些选项必须比其他选项更早处理。内核提供了early_param宏以声明这些选项替代__setup。
+ early_param和__setup的唯一区别时early_param会设置一个特殊的标识，使内核能够区分这两种情况。
+ 所以内核在启动的时候会调用2此parse_args函数：
+	第一遍只看必须在初期处理的较高优先级的选项，有一个特殊的标识(early)识别。
+	第二遍会负责所有其他选项。多数选项都属于这一类。
+ */
 #define early_param(str, fn)					\
 	__setup_param(str, fn, fn, 1)
 
@@ -247,6 +257,7 @@ void __init parse_early_param(void);
  * module_init() will either be called during do_initcalls() (if
  * builtin) or at module insertion time (if a module).  There can only
  * be one per module.
+ * 模块加载时被调用，以初始化该模块
  */
 #define module_init(x)	__initcall(x);
 
@@ -259,6 +270,7 @@ void __init parse_early_param(void);
  * the driver is a module.  If the driver is statically
  * compiled into the kernel, module_exit() has no effect.
  * There can only be one per module.
+ * 删除模块时，内核会调用该函数，以释放由模块由于其用途所分配的任何资源
  */
 #define module_exit(x)	__exitcall(x);
 

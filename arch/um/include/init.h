@@ -60,7 +60,9 @@ typedef void (*exitcall_t)(void);
 #define __initdata	__section(.init.data)
 #define __exitdata	__section(.exit.data)
 #define __exit_call	__used __section(.exitcall.exit)
-
+/*
+用于关闭模块的函数都放在.text.exit节区中。对内建于内核的模块而言，这个节区可以在链接期间直接丢弃掉。
+*/
 #ifdef MODULE
 #define __exit		__section(.exit.text)
 #else

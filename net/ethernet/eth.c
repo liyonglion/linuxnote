@@ -59,7 +59,7 @@
 #include <net/ip.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
-
+// 注册启动阶段参数处理。
 __setup("ether=", netdev_boot_setup);
 
 /**

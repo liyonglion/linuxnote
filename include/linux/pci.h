@@ -379,21 +379,27 @@ struct pci_error_handlers {
 /* ---------------------------------------------------------------- */
 
 struct module;
+//Peripheral commponent interconnect： 外围设备互连。
+/*
+当设备驱动程序A被加载时，会调用pci_register_driver()并提供其pci_driver实例而与PCI层注册。pci_driver结构有内含一个此驱动程序能驱动的PCI设备ID的向量。接着，PCI层使用该表
+取查看在已侦测的PCI设备列表中与哪些设备匹配，就会建立该驱动程序的设备列表。对于每个匹配的设备而言，PCI层会调用相匹配的驱动程序中的pci_driver结构中所提供的probe函数。probe函数会建立并注册相关联的网络设备。
+
+*/
 struct pci_driver {
 	struct list_head node;
-	char *name;
-	const struct pci_device_id *id_table;	/* must be non-NULL for probe to be called */
-	int  (*probe)  (struct pci_dev *dev, const struct pci_device_id *id);	/* New device inserted */
-	void (*remove) (struct pci_dev *dev);	/* Device removed (NULL if not a hot-plug capable driver) */
+	char *name; //驱动程序的名称
+	const struct pci_device_id *id_table;	/* must be non-NULL for probe to be called ID向量，内核用于把一些设备关联到此驱动程序*/
+	int  (*probe)  (struct pci_dev *dev, const struct pci_device_id *id);	/* New device inserted 当PCI层发现它正在搜索驱动程序的设备ID与前面所提到的id_table匹配，就会调用此函数。此函数应该开启硬件、分配net_device结构、初始化并注册新设备*/
+	void (*remove) (struct pci_dev *dev);	/* 当驱动程序从内核除名时，或者当可热插拔设备被删除时，PCI层就会调用此函数。此函数时probe的配对函数，用于清理任何数据结构和状态。网络设备使用此函数来释放已分配IO端口和IO内存，为设备除名，释放net_device数据结构以及其他由设备驱动程序在probe函数内所分配的辅助数据结构*/
 	int  (*suspend) (struct pci_dev *dev, pm_message_t state);	/* Device suspended */
 	int  (*suspend_late) (struct pci_dev *dev, pm_message_t state);
 	int  (*resume_early) (struct pci_dev *dev);
-	int  (*resume) (struct pci_dev *dev);	                /* Device woken up */
+	int  (*resume) (struct pci_dev *dev);	                /* 当系统进入挂起模式以及重新继续时，PCI层就会调用这些函数*/
 	void (*shutdown) (struct pci_dev *dev);
 
 	struct pci_error_handlers *err_handler;
-	struct device_driver	driver;
-	struct pci_dynids dynids;
+	struct device_driver	driver; 
+	struct pci_dynids dynids; //动态ID
 };
 
 #define	to_pci_driver(drv) container_of(drv, struct pci_driver, driver)
@@ -653,6 +659,9 @@ void pci_enable_bridges(struct pci_bus *bus);
 /* Proper probing supporting hot-pluggable devices */
 int __must_check __pci_register_driver(struct pci_driver *, struct module *,
 				       const char *mod_name);
+/*
+	借助于pci_driver的id_table向量，内核知道该驱动程序可以处理哪些设备，一次pci_driver中的所有函数，使内核有一种机制，可以与此驱动程序的任何相关联的设备彼此交互
+*/
 static inline int __must_check pci_register_driver(struct pci_driver *driver)
 {
 	return __pci_register_driver(driver, THIS_MODULE, KBUILD_MODNAME);
