@@ -41,9 +41,9 @@ struct net {
 
 	struct net_device       *loopback_dev;          /* The loopback */
 
-	struct list_head 	dev_base_head;
-	struct hlist_head 	*dev_name_head; //相当于map[hash(dev->name)%NETDEV_HASHBITS]net_dev
-	struct hlist_head	*dev_index_head; //相当于map[ifindex%NETDEV_HASHBITS]net_dev
+	struct list_head 	dev_base_head; //内涵所有net_device实例的全局列表能够让内核轻易浏览设备，例如取得某些统计数据，因用户命令而必须改变所有设备的某项配置，或者找到温和特定设备
+	struct hlist_head 	*dev_name_head; //相当于map[hash(dev->name)%NETDEV_HASHBITS]net_dev 。这是一张hash表，以设备名称为索引。例如，通过ioctl接口应用某项配置变更时，就有其用处。
+	struct hlist_head	*dev_index_head; //相当于map[ifindex%NETDEV_HASHBITS]net_dev。这是一张hash表，以设备ID dev->ifindex为索引。对net_device结构做交叉引用时，通常会存储设备ID或者指向net_device结构的指针。
 
 	/* core fib_rules */
 	struct list_head	rules_ops;

@@ -497,7 +497,14 @@ struct net_device
 
 	unsigned char		if_port;	/* Selectable AUI, TP,..接口所使用的端口类型*/
 	unsigned char		dma;		/* DMA channel	设备所使用的DMA通道	*/
-
+	/*
+		每个网络设备都会被分派一种队列规则，流量控制以此实现其Qos机制。state字段就是流量控制所用的结构字段之一。state是位域，下列是可以设置的标识：
+		__LINK_STATE_START: 设备开启。此标识用于由netif_running检查。
+		__LINK_STATE_PRESENT： 设备存在。此标识看起来多余，当设备进去挂起模式然后再继续重新继续时，此标识也会被清除后再取回其值
+		__LINK_STATE_NOCARRIER: 设备没有载波。此标识用于由netif_carrier_on和netif_carrier_off检查。
+		__LINK_STATE_LINKWATCH_EVENT: 设备的链接状态已变更。
+		__LINK_STATE_XOFF、__LINK_STATE_SHED、__LINK_STATE_RX_SCHED： 这三个标识由负载管理设备的入口和出口流量的代码所使用
+	*/
 	unsigned long		state; 
 
 	struct list_head	dev_list;
@@ -695,18 +702,17 @@ struct net_device
 	struct net_device	*link_watch_next;
 
 	/* register/unregister state machine */
-	enum { NETREG_UNINITIALIZED=0,
-	       NETREG_REGISTERED,	/* completed register_netdevice */
-	       NETREG_UNREGISTERING,	/* called unregister_netdevice */
-	       NETREG_UNREGISTERED,	/* completed unregister todo */
-	       NETREG_RELEASED,		/* called free_netdev */
+	enum { NETREG_UNINITIALIZED=0, //当net_device数据结构已分配且其内容都清为0时
+	       NETREG_REGISTERED,	/* completed register_netdevice   注册完成，调用玩了register_netdevice()*/
+	       NETREG_UNREGISTERING,	/* called unregister_netdevice 调用unregister_netdevice()*/
+	       NETREG_UNREGISTERED,	/* completed unregister todo 设备已经完全卸载(包括删除/sys中的项目)，但是net_device结构还没有释放掉*/
+	       NETREG_RELEASED,		/* called free_netdev 所有对net_device结构的引用都已释放掉了*/
 	} reg_state; //设备注册状态
 
 	/* Called after device is detached from network. */
-	void			(*uninit)(struct net_device *dev); //清理一个设备
+	void			(*uninit)(struct net_device *dev); //清理一个设备。目前有些隧道虚拟设备会对此函数指针进行初始化：指向一个函数，而此函数主要负责引用计数。
 	/* Called after last user reference disappears. */
-	void			(*destructor)(struct net_device *dev);//销毁一个设备
-
+	void			(*destructor)(struct net_device *dev);//销毁一个设备。通常初始化为free_netdev或者内含free_netdev的包裹函数，大多数dstructor通常不做初始化，而是少数虚拟设备使用。多数设备驱动程序再unregister_netdevice之后都会直接调用free_netdev
 	/* Pointers to interface service routines.	*/
 	int			(*open)(struct net_device *dev); //开启一个设备
 	int			(*stop)(struct net_device *dev); //关闭一个设备

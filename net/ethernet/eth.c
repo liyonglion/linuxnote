@@ -321,20 +321,20 @@ const struct header_ops eth_header_ops ____cacheline_aligned = {
  */
 void ether_setup(struct net_device *dev)
 {
-	dev->header_ops		= &eth_header_ops;
+	dev->header_ops		= &eth_header_ops;// 头操作集
 
-	dev->change_mtu		= eth_change_mtu;
-	dev->set_mac_address 	= eth_mac_addr;
-	dev->validate_addr	= eth_validate_addr;
+	dev->change_mtu		= eth_change_mtu; // MTU设置
+	dev->set_mac_address 	= eth_mac_addr; // MAC地址设置
+	dev->validate_addr	= eth_validate_addr; // MAC地址验证
 
-	dev->type		= ARPHRD_ETHER;
-	dev->hard_header_len 	= ETH_HLEN;
-	dev->mtu		= ETH_DATA_LEN;
-	dev->addr_len		= ETH_ALEN;
-	dev->tx_queue_len	= 1000;	/* Ethernet wants good queues */
-	dev->flags		= IFF_BROADCAST|IFF_MULTICAST;
+	dev->type		= ARPHRD_ETHER; // 设备类型 以太10M
+	dev->hard_header_len 	= ETH_HLEN; // 头长度
+	dev->mtu		= ETH_DATA_LEN; // 默认MTU大小
+	dev->addr_len		= ETH_ALEN; // MAC地址长度
+	dev->tx_queue_len	= 1000;	/* Ethernet wants good queues 发送队列大小*/
+	dev->flags		= IFF_BROADCAST|IFF_MULTICAST; //支持多播和广播
 
-	memset(dev->broadcast, 0xFF, ETH_ALEN);
+	memset(dev->broadcast, 0xFF, ETH_ALEN); //将广播地址设置为FF:FF:FF:FF:FF:FF
 
 }
 EXPORT_SYMBOL(ether_setup);

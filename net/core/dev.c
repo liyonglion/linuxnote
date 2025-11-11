@@ -3655,34 +3655,37 @@ static void rollback_registered(struct net_device *dev)
 
 	BUG_ON(dev->reg_state != NETREG_REGISTERED);
 
-	/* If device is running, close it first. */
+	/* If device is running, close it first. 关闭设备 */
 	dev_close(dev);
 
-	/* And unlink it from device chain. */
+	/* And unlink it from device chain. 从全局列表dev_base和那两张hash表中删除 */
 	unlist_netdevice(dev);
 
 	dev->reg_state = NETREG_UNREGISTERING;
 
 	synchronize_net();
 
-	/* Shutdown queueing discipline. */
+	/* Shutdown queueing discipline. 所有和该设备相关的队列规则实例都会销毁 */
 	dev_shutdown(dev);
 
 
 	/* Notify protocols, that we are about to destroy
 	   this device. They should clean all the things.
+	   NETDEV_UNREGISTER 通知信息会发往netdev_chain通知连，让其他内核组件知晓此事
 	*/
 	call_netdevice_notifiers(NETDEV_UNREGISTER, dev);
 
 	/*
 	 *	Flush the unicast and multicast chains
+	 任何链接至net_device结构的数据区块都会被释放。例如，多播数据dev=>mc_list会使用dev_mc_discard删除
 	 */
 	dev_addr_discard(dev);
 
-	if (dev->uninit)
+	if (dev->uninit)//无论再register_netdevice中的dev->init做了什么，这里dev->uninit都要予以复原
 		dev->uninit(dev);
 
-	/* Notifier chain MUST detach us from master device. */
+	/* Notifier chain MUST detach us from master device. 绑定功能可让你把一组设备集群绑定在一起，将其视为有特殊性质的单一虚拟设备。而在这些
+	设备中，通常会有一个主设备，因为主设备会有此群组内扮演的特殊角色。显然，要删除的设备应该释放任何对主设备的引用：此时，dev->master的值不为NULL就是bug了。*/
 	BUG_TRAP(!dev->master);
 
 	/* Remove entries from kobject tree */
@@ -3690,7 +3693,7 @@ static void rollback_registered(struct net_device *dev)
 
 	synchronize_net();
 
-	dev_put(dev);
+	dev_put(dev);//引用计数减一
 }
 
 /**
@@ -3766,13 +3769,18 @@ int register_netdevice(struct net_device *dev)
 	}
 
 	/* Fix illegal checksum combinations */
+	/*
+	NETIF_F_HW_CSUM：硬件通用校验和计算能力
+	NETIF_F_IP_CSUM或 NETIF_F_IPV6_CSUM：软件IP/IPv6校验和计算能力
+	如果硬件支持校验和，则关闭软件校验和能力
+	*/
 	if ((dev->features & NETIF_F_HW_CSUM) &&
 	    (dev->features & (NETIF_F_IP_CSUM|NETIF_F_IPV6_CSUM))) {
 		printk(KERN_NOTICE "%s: mixed HW and IP checksum settings.\n",
 		       dev->name);
 		dev->features &= ~(NETIF_F_IP_CSUM|NETIF_F_IPV6_CSUM);
 	}
-
+	//网络设备不需要校验检查而设备支持硬件校验以及软件校验，则关闭硬软件校验
 	if ((dev->features & NETIF_F_NO_CSUM) &&
 	    (dev->features & (NETIF_F_HW_CSUM|NETIF_F_IP_CSUM|NETIF_F_IPV6_CSUM))) {
 		printk(KERN_NOTICE "%s: mixed no checksumming and other settings.\n",
@@ -3782,6 +3790,11 @@ int register_netdevice(struct net_device *dev)
 
 
 	/* Fix illegal SG+CSUM combinations. */
+	/*
+	NETIF_F_SG：支持分散/聚集 I/O（Scatter/Gather）
+	NETIF_F_ALL_CSUM：支持任何校验和功能
+	SG处理的数据包可能跨越多个内存页，没有校验和，无法保障数据再传输过程中没有损坏
+	*/
 	if ((dev->features & NETIF_F_SG) &&
 	    !(dev->features & NETIF_F_ALL_CSUM)) {
 		printk(KERN_NOTICE "%s: Dropping NETIF_F_SG since no checksum feature.\n",
@@ -3790,20 +3803,28 @@ int register_netdevice(struct net_device *dev)
 	}
 
 	/* TSO requires that SG is present as well. */
+	/*
+	NETIF_F_TSO：支持TCP分段卸载
+	NETIF_F_SG：支持分散/聚集 I/O
+	TSO处理的大量数据包通常分散再多个内存页中，没有SG能力，网卡无法搞笑处理这些分散的数据片段
+	*/
 	if ((dev->features & NETIF_F_TSO) &&
 	    !(dev->features & NETIF_F_SG)) {
 		printk(KERN_NOTICE "%s: Dropping NETIF_F_TSO since no SG feature.\n",
 		       dev->name);
 		dev->features &= ~NETIF_F_TSO;
 	}
+	/*
+		NETIF_F_UFO：UDP 数据包分片工作卸载到网卡硬件
+	*/
 	if (dev->features & NETIF_F_UFO) {
-		if (!(dev->features & NETIF_F_HW_CSUM)) {
+		if (!(dev->features & NETIF_F_HW_CSUM)) {//网卡需要在分片过程中为每个片段计算校验和，如果硬件不支持校验和，则关闭UFO
 			printk(KERN_ERR "%s: Dropping NETIF_F_UFO since no "
 					"NETIF_F_HW_CSUM feature.\n",
 							dev->name);
 			dev->features &= ~NETIF_F_UFO;
 		}
-		if (!(dev->features & NETIF_F_SG)) {
+		if (!(dev->features & NETIF_F_SG)) { //大的 UDP 数据包通常存储在非连续内存中，网卡需要能够从多个内存位置收集数据并进行分片，没有 SG 支持，无法高效处理分散的数据缓冲区
 			printk(KERN_ERR "%s: Dropping NETIF_F_UFO since no "
 					"NETIF_F_SG feature.\n",
 					dev->name);
@@ -3822,14 +3843,16 @@ int register_netdevice(struct net_device *dev)
 	 *	device is present.
 	 */
 
-	set_bit(__LINK_STATE_PRESENT, &dev->state);
-
+	set_bit(__LINK_STATE_PRESENT, &dev->state);//设备能为系统所用。例如当可热插拔设备拔出时，或者当支持电源管理的系统进入挂起模式时，该标志会被清除
+	/*设备的队列规则通过dev_init_scheduler做初始化，由流量控制用于实现Qos。队列规则定义了出口封包如何排入出口队列，以及如何退出出口队列，定义开始
+	丢掉封包前有多少封包可以排入队列中等等
+	*/
 	dev_init_scheduler(dev);
 	dev_hold(dev);
 	list_netdevice(dev);
 
 	/* Notify protocols, that a new device appeared. */
-	ret = call_netdevice_notifiers(NETDEV_REGISTER, dev);
+	ret = call_netdevice_notifiers(NETDEV_REGISTER, dev);//netdev_chain通知链，通知所有对此设备注册感兴趣的子系统
 	ret = notifier_to_errno(ret);
 	if (ret) {
 		rollback_registered(dev);
@@ -3891,12 +3914,14 @@ EXPORT_SYMBOL(register_netdev);
  * reference if they receive an UNREGISTER event.
  * We can get stuck here if buggy protocols don't correctly
  * call dev_put.
+ * netdev_wait_allrefs由一个循环组成，只有当前dev->refcnt减至0时才会退出。此函数每秒都会发出一个NETDEV_UNREGISTER通知消息，每10秒都会再控制台打印一条告警。剩余
+ * 时间都是再休眠。此函数不会放弃，知道对输入的net_device结构的所有应用都释放为止。
  */
 static void netdev_wait_allrefs(struct net_device *dev)
 {
 	unsigned long rebroadcast_time, warning_time;
 
-	rebroadcast_time = warning_time = jiffies;
+	rebroadcast_time = warning_time = jiffies;//记录当前时间
 	while (atomic_read(&dev->refcnt) != 0) {
 		if (time_after(jiffies, rebroadcast_time + 1 * HZ)) {
 			rtnl_lock();
