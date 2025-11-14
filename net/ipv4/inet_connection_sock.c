@@ -47,13 +47,23 @@ void inet_get_local_port_range(int *low, int *high)
 }
 EXPORT_SYMBOL(inet_get_local_port_range);
 
+//sk： 当前绑定的socket
+//tb： 端口绑定哈希桶，包含所有绑定到同一端口的socket
+/*
+	SO_REUSEADDR用于对TCP套接字处于TIME_WAIT状态下的socket，才可以重复绑定使用。server程序总是应该在调用bind()之前设置SO_REUSEADDR套接字选项。
+	SO_REUSEADDR提供如下四个功能：
+		SO_REUSEADDR允许启动一个监听服务器并捆绑某端口，即使以前建立的将此端口用做他们的本地端口的连接仍存在。这通常是重启监听服务器时出现，若不设置此选项，则bind时将出错。
+		SO_REUSEADDR允许在同一端口上启动同一服务器的多个实例，只要每个实例捆绑一个不同的本地IP地址即可。对于TCP，我们根本不可能启动捆绑相同IP地址和相同端口号的多个服务器，因为前一个服务程序的套接口处于listen状态，必定会进行冲突监测
+		SO_REUSEADDR允许单个进程捆绑同一端口到多个套接口上，只要每个捆绑指定不同的本地IP地址即可。这一般不用于TCP服务器。
+		SO_REUSEADDR允许完全重复的捆绑：当一个IP地址和端口绑定到某个套接口上时，还允许此IP地址和端口捆绑到另一个套接口上。一般来说，这个特性仅在支持多播的系统上才有，而且只对UDP套接口而言（TCP不支持多播）。
+*/
 int inet_csk_bind_conflict(const struct sock *sk,
 			   const struct inet_bind_bucket *tb)
 {
-	const __be32 sk_rcv_saddr = inet_rcv_saddr(sk);
+	const __be32 sk_rcv_saddr = inet_rcv_saddr(sk);//当前sock的绑定地址
 	struct sock *sk2;
 	struct hlist_node *node;
-	int reuse = sk->sk_reuse;
+	int reuse = sk->sk_reuse;// SO_REUSEADDR选项值
 
 	/*
 	 * Unlike other sk lookup places we do not check
@@ -62,15 +72,54 @@ int inet_csk_bind_conflict(const struct sock *sk,
 	 * one this bucket belongs to.
 	 */
 	//桶队列中取出每个sock结构，对比绑定的sock结构，如果设备相同，绑定的地址也相同就地址冲突了
+
 	sk_for_each_bound(sk2, node, &tb->owners) {
-		if (sk != sk2 &&
-		    !inet_v6_ipv6only(sk2) &&
+			/*
+		场景1： 都不绑定设备(监听所有网络接口)
+			sk->sk_bound_dev_if = 0
+			sk2->sk_bound_dev_if = 0
+			满足条件，继续检查
+		场景2： 绑定到不同设备
+			sk->sk_bound_dev_if = eth0
+			sk->sk_bound_dev_if = eth1
+			条件不满足，不冲突(可以绑定到不同网卡)
+		场景3： 绑定到相同设备
+			sk->sk_bound_dev_if = eth0
+			sk2->sk_bound_dev_if = eth0
+			条件满足，继续检查
+		*/
+		if (sk != sk2 && // 不是同一个sock
+		    !inet_v6_ipv6only(sk2) && // sk2 不是ipv6-only，兼容ipv4
 		    (!sk->sk_bound_dev_if ||
-		     !sk2->sk_bound_dev_if ||
+		     !sk2->sk_bound_dev_if || //  
 		     sk->sk_bound_dev_if == sk2->sk_bound_dev_if)) {
-			if (!reuse || !sk2->sk_reuse ||
-			    sk2->sk_state == TCP_LISTEN) {
-				const __be32 sk2_rcv_saddr = inet_rcv_saddr(sk2);
+			/*
+				当前socket或者对比socket不允许出现端口复用再或者对比socket状态为Listen状态，则进行冲突检查。
+				注意：对于tcp来说，只要对比socket状态为Listen状态，则必须进行冲突检查。
+				为什么需要检查tcp socket状态为Listen状态的原因？因为tcp是以四元组来定位一个链接，对于syn的报文，如果允许出现同一个端口，则会不知道将该报文发给到哪个socket，
+				但是在linux 3.9版本中出现SO_REUSEPORT选项，允许同一个端口重复使用
+			*/
+			if (!reuse || !sk2->sk_reuse || // ！reuse 表示当前socket不允许出现端口复用；！sk2->sk_reuse 其他socket不允许出现端口复用
+			    sk2->sk_state == TCP_LISTEN) { //对比socket状态为Listen状态
+				const __be32 sk2_rcv_saddr = inet_rcv_saddr(sk2);//对比socket的绑定地址
+				/*
+					场景1： 两个socket都绑定INADDR_ANY
+						sk_rcv_saddr = 0.0.0.0
+						sk2_rcv_saddr = 0.0.0.0
+						冲突(0.0.0.0与0.0.0.0重叠)
+					场景2： 绑定到相同IP
+						sk_rcv_saddr = 192.168.1.1
+						sk2_rcv_saddr = 192.168.1.1
+						冲突
+					场景3：绑定到特定IP vs INADDR_ANY
+						sk_rcv_saddr = 192.168.1.1
+						sk2_rcv_saddr = 0.0.0.0
+						冲突！(INADDR_ANY包含所有IP)
+					场景4：绑定不同IP
+						sk_rcv_saddr = 192.168.1.1
+						sk2_rcv_saddr = 192.168.1.2
+						不冲突
+				*/
 				if (!sk2_rcv_saddr || !sk_rcv_saddr ||
 				    sk2_rcv_saddr == sk_rcv_saddr)
 					break;

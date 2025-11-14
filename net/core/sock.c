@@ -474,7 +474,7 @@ int sock_setsockopt(struct socket *sock, int level, int optname,
 			sock_valbool_flag(sk, SOCK_DBG, valbool);
 		break;
 	case SO_REUSEADDR:
-		sk->sk_reuse = valbool;
+		sk->sk_reuse = valbool; //将SO_REUSEADDR标志设置为valbool
 		break;
 	case SO_TYPE:
 	case SO_ERROR:

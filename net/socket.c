@@ -1722,13 +1722,13 @@ asmlinkage long sys_setsockopt(int fd, int level, int optname,
 
 	if (optlen < 0)
 		return -EINVAL;
-
+	//从当前进程的文件描述符中获取socket指针
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
 	if (sock != NULL) {
 		err = security_socket_setsockopt(sock, level, optname);
 		if (err)
 			goto out_put;
-
+		
 		if (level == SOL_SOCKET) //设置套接字选项
 			err =
 			    sock_setsockopt(sock, level, optname, optval,
