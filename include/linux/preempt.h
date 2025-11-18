@@ -27,12 +27,13 @@
 
 asmlinkage void preempt_schedule(void);
 
+//为当前任务关闭抢占功能，可以重复调用，递增一个应用计数器
 #define preempt_disable() \
 do { \
 	inc_preempt_count(); \
 	barrier(); \
 } while (0)
-
+ // 只递减一个引用计数器，使得当其值到达零时，可以让抢占功能再度开启
 #define preempt_enable_no_resched() \
 do { \
 	barrier(); \
@@ -45,9 +46,10 @@ do { \
 		preempt_schedule(); \
 } while (0)
 
+//为当前任务重新打开抢占功能，检查当前计数器是否为零，然后强制调用schedule()，让任何较高优先级得任务去执行
 #define preempt_enable() \
 do { \
-	preempt_enable_no_resched(); \
+	preempt_enable_no_resched(); \ 
 	barrier(); \
 	preempt_check_resched(); \
 } while (0)

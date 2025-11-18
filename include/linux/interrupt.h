@@ -292,7 +292,7 @@ asmlinkage void do_softirq(void);
 asmlinkage void __do_softirq(void);
 extern void open_softirq(int nr, void (*action)(struct softirq_action*), void *data);
 extern void softirq_init(void);
-#define __raise_softirq_irqoff(nr) do { or_softirq_pending(1UL << (nr)); } while (0)
+#define __raise_softirq_irqoff(nr) do { or_softirq_pending(1UL << (nr)); } while (0) //设置与输入的软IRQ类型相关联的标识，将该软IRQ标记为未决定
 extern void raise_softirq_irqoff(unsigned int nr);
 extern void raise_softirq(unsigned int nr);
 

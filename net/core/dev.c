@@ -252,7 +252,7 @@ static RAW_NOTIFIER_HEAD(netdev_chain);
  *	Device drivers call our routines to queue packets here. We empty the
  *	queue in the local softnet handler.
  */
-
+//为每个cpu都注册softnet_data数据结构体，用于处理入口和出口流量，因此，不同cpu之间没有必要使用上锁机制
 DEFINE_PER_CPU(struct softnet_data, softnet_data);
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
@@ -1791,14 +1791,19 @@ DEFINE_PER_CPU(struct netif_rx_stats, netdev_rx_stat) = { 0, };
  *	NET_RX_DROP     (packet was dropped)
  *
  */
-
+/*
+设备驱动函数调用此函数，注意此函数实在硬中断被调用，被调用说明此NIC不支持NAPI。
+其中softnet_data作为主导结构，在NAPI的处理方式下，主要维护轮询链表。NAPI设备均对应一个napi_struct结构，添加到链表中；非NAPI没有对应的napi_struct结构，为了使用NAPI的处理流程，使用了softnet_data结构中的back_log作为一个虚拟设备添加到轮询链表。
+同时由于非NAPI设备没有各自的接收队列，所以利用了softnet_data结构的input_pkt_queue作为全局的接收队列。这样就处理而言，可以和NAPI的设备进行兼容。但是还有一个重要区别，在NAPI的方式下，首次数据包的接收使用中断的方式，而后续的数据包就会使用轮询处理了；
+而非NAPI每次都是通过中断通知。
+*/
 int netif_rx(struct sk_buff *skb)
 {
 	struct softnet_data *queue;
 	unsigned long flags;
 
-	/* if netpoll wants it, pretend we never saw it */
-	if (netpoll_rx(skb))
+	/* netpoll用于内核网络调试和远程诊断，直接DROp，不进入正常协议栈 */
+	if (netpoll_rx(skb)) //netpoll会处理该数据包。返回1标识该数据包被处理，返回0标识该数据包没有被处理。
 		return NET_RX_DROP;
 
 	if (!skb->tstamp.tv64)
@@ -1808,19 +1813,20 @@ int netif_rx(struct sk_buff *skb)
 	 * The code is rearranged so that the path is the most
 	 * short when CPU is congested, but is still operating.
 	 */
-	local_irq_save(flags);
-	queue = &__get_cpu_var(softnet_data);
+	local_irq_save(flags); //关闭硬中断
+	queue = &__get_cpu_var(softnet_data); //获取当前cpu的softnet_data结构体
 
 	__get_cpu_var(netdev_rx_stat).total++;
-	if (queue->input_pkt_queue.qlen <= netdev_max_backlog) {
-		if (queue->input_pkt_queue.qlen) {
+	if (queue->input_pkt_queue.qlen <= netdev_max_backlog) { //队列长度小于netdev_max_backlog
+		if (queue->input_pkt_queue.qlen) { //如果input_pkt_queue不为空，说明已经得到调度，此时仅仅把数据加入input_pkt_queue队列即可
 enqueue:
 			dev_hold(skb->dev);
-			__skb_queue_tail(&queue->input_pkt_queue, skb);
+			__skb_queue_tail(&queue->input_pkt_queue, skb);//添加到input_pkt_queue队列尾部
 			local_irq_restore(flags);
 			return NET_RX_SUCCESS;
 		}
-
+		//否则需要调度backlog 即虚拟设备，然后再入队。napi_struct结构中的state字段如果标记了NAPI_STATE_SCHED,则表明该设备已经在调度，不需要再次调度。
+		//napi_schedule 把虚拟设备对应的napi_struct结构插入到softnet_data的poll_list尾部，然后唤醒中断。
 		napi_schedule(&queue->backlog);
 		goto enqueue;
 	}
@@ -2140,7 +2146,10 @@ out:
 	rcu_read_unlock();
 	return ret;
 }
-
+/*
+函数还是比较简单的，需要注意的每次处理都携带一个配额，即本次只能处理quota个数据包，如果超额了，即使没处理完也要返回，这是为了保证处理器的公平使用。处理在一个while循环中完成，循环条件正是work < quota，首先会从input_pkt_queue中取出skb,调用netif_receive_skb上传给协议栈，
+然后增加work。当work即将大于quota时，即++work >= quota时，就要返回
+*/
 static int process_backlog(struct napi_struct *napi, int quota)
 {
 	int work = 0;
@@ -2184,7 +2193,7 @@ void __napi_schedule(struct napi_struct *n)
 
 	local_irq_save(flags);
 	list_add_tail(&n->poll_list, &__get_cpu_var(softnet_data).poll_list);
-	__raise_softirq_irqoff(NET_RX_SOFTIRQ);
+	__raise_softirq_irqoff(NET_RX_SOFTIRQ); //设置了软中断接收标志位
 	local_irq_restore(flags);
 }
 EXPORT_SYMBOL(__napi_schedule);
@@ -2192,13 +2201,16 @@ EXPORT_SYMBOL(__napi_schedule);
 
 static void net_rx_action(struct softirq_action *h)
 {
-	struct list_head *list = &__get_cpu_var(softnet_data).poll_list;
-	unsigned long start_time = jiffies;
-	int budget = netdev_budget;
+	struct list_head *list = &__get_cpu_var(softnet_data).poll_list; //从softnet_data中获取poll_list
+	unsigned long start_time = jiffies; //获取当前时间
+	int budget = netdev_budget; //获取软中断的预算，所有设备共享
 	void *have;
 
-	local_irq_disable();
-
+	local_irq_disable(); //关闭中断
+ /*
+    进入一个循环，因为软中断处理函数与硬件中断并不是同步的，因此，我们此时并不知道
+    数据包属于哪个设备，因此只能采取逐个查询的方式，遍历整个接收设备列表。
+    */
 	while (!list_empty(list)) {
 		struct napi_struct *n;
 		int work, weight;
@@ -2210,8 +2222,10 @@ static void net_rx_action(struct softirq_action *h)
 		 * jiffies to pass before breaking out.  The test
 		 * used to be "jiffies - start_time > 1".
 		 */
-		if (unlikely(budget <= 0 || jiffies != start_time))
-			goto softnet_break;
+		/*如果花费超过预算，或者处理时间超过1秒，立刻从软中断处理函数跳出，我想
+        这可能是系统考虑效率和实时性，一次不能做过多的工作或者浪费过多的时间。*/
+		if (unlikely(budget <= 0 || jiffies != start_time)) //没有预算或者执行时间超过1HZ
+			goto softnet_break; //需要结束net的软中断处理
 
 		local_irq_enable();
 
@@ -2220,11 +2234,11 @@ static void net_rx_action(struct softirq_action *h)
 		 * entries to the tail of this list, and only ->poll()
 		 * calls can remove this head entry from the list.
 		 */
-		n = list_entry(list->next, struct napi_struct, poll_list);
+		n = list_entry(list->next, struct napi_struct, poll_list); // 从poll_list中取出第一个napi_struct结构体
 
 		have = netpoll_poll_lock(n);
 
-		weight = n->weight;
+		weight = n->weight; // 获取该设备poll的最大配额
 
 		/* This NAPI_STATE_SCHED test is for avoiding a race
 		 * with netpoll's poll_napi().  Only the entity which
@@ -2234,11 +2248,11 @@ static void net_rx_action(struct softirq_action *h)
 		 */
 		work = 0;
 		if (test_bit(NAPI_STATE_SCHED, &n->state))
-			work = n->poll(n, weight);
+			work = n->poll(n, weight); //调用网卡注册的poll函数
 
 		WARN_ON_ONCE(work > weight);
 
-		budget -= work;
+		budget -= work; //减去实际处理了多少数据
 
 		local_irq_disable();
 
@@ -2247,11 +2261,11 @@ static void net_rx_action(struct softirq_action *h)
 		 * still "owns" the NAPI instance and therefore can
 		 * move the instance around on the list at-will.
 		 */
-		if (unlikely(work == weight)) {
-			if (unlikely(napi_disable_pending(n)))
-				__napi_complete(n);
+		if (unlikely(work == weight)) { //设备已经返回了最大数据量，避免一个设备独占CPU时间
+			if (unlikely(napi_disable_pending(n)))//设备中已经没有包了
+				__napi_complete(n); //napi已经完成，清理NAPI_STATE_SCHED标志位
 			else
-				list_move_tail(&n->poll_list, list);
+				list_move_tail(&n->poll_list, list);//设备中还有包，因为该设备的配额已经用完，需要再次放入poll_list中
 		}
 
 		netpoll_poll_unlock(have);
@@ -4598,7 +4612,7 @@ static int __init net_dev_init(void)
 	/*
 	 *	Initialise the packet receive queues.
 	 */
-
+	//为每个cpu初始化softnet_data结构体
 	for_each_possible_cpu(i) {
 		struct softnet_data *queue;
 
@@ -4607,14 +4621,14 @@ static int __init net_dev_init(void)
 		queue->completion_queue = NULL;
 		INIT_LIST_HEAD(&queue->poll_list);
 
-		queue->backlog.poll = process_backlog;
+		queue->backlog.poll = process_backlog; //而非NAPI对应poll函数为process_backlog
 		queue->backlog.weight = weight_p;
 	}
 
 	netdev_dma_register();
 
 	dev_boot_phase = 0;
-
+	//注册网络接收和发送数据包软中断
 	open_softirq(NET_TX_SOFTIRQ, net_tx_action, NULL);
 	open_softirq(NET_RX_SOFTIRQ, net_rx_action, NULL);
 

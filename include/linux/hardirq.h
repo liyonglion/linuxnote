@@ -68,9 +68,9 @@
  * Are we doing bottom half or hardware interrupt processing?
  * Are we in a softirq context? Interrupt context?
  */
-#define in_irq()		(hardirq_count())
-#define in_softirq()		(softirq_count())
-#define in_interrupt()		(irq_count())
+#define in_irq()		(hardirq_count()) //如果cpu正在服务于一个硬件中断，则返回true
+#define in_softirq()		(softirq_count()) //如果cpu正在服务于一个软中断，则返回true
+#define in_interrupt()		(irq_count()) //如果cpu正在服务于一个硬件中断或软件中断，或者抢占功能时关闭的，返回true
 
 #if defined(CONFIG_PREEMPT)
 # define PREEMPT_INATOMIC_BASE kernel_locked()

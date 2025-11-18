@@ -18,7 +18,7 @@
 
 #define __ARCH_IRQ_STAT	1
 
-#define local_softirq_pending()		(local_cpu_data->softirq_pending)
+#define local_softirq_pending()		(local_cpu_data->softirq_pending) // 如果本地CPU至少有一个软IRQ未决定中，就返回TRUE
 
 #define HARDIRQ_BITS	14
 

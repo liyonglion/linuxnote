@@ -257,7 +257,7 @@ cpu_callback(struct notifier_block *nfb, unsigned long action, void *hcpu)
 	struct task_struct *p;
 
 	switch (action) {
-	case CPU_UP_PREPARE:
+	case CPU_UP_PREPARE: //当cpu将要运行起来但还没有继续时
 	case CPU_UP_PREPARE_FROZEN:
 		BUG_ON(per_cpu(watchdog_task, hotcpu));
 		p = kthread_create(watchdog, hcpu, "watchdog/%d", hotcpu);
@@ -269,7 +269,7 @@ cpu_callback(struct notifier_block *nfb, unsigned long action, void *hcpu)
 		per_cpu(watchdog_task, hotcpu) = p;
 		kthread_bind(p, hotcpu);
 		break;
-	case CPU_ONLINE:
+	case CPU_ONLINE: //cpu就绪
 	case CPU_ONLINE_FROZEN:
 		check_cpu = any_online_cpu(cpu_online_map);
 		wake_up_process(per_cpu(watchdog_task, hotcpu));

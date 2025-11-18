@@ -59,10 +59,10 @@ static DEFINE_PER_CPU(struct task_struct *, ksoftirqd);
 static inline void wakeup_softirqd(void)
 {
 	/* Interrupts are disabled: no need to stop preemption */
-	struct task_struct *tsk = __get_cpu_var(ksoftirqd);
+	struct task_struct *tsk = __get_cpu_var(ksoftirqd); //当前cpu 的ksoftirqd进程
 
 	if (tsk && tsk->state != TASK_RUNNING)
-		wake_up_process(tsk);
+		wake_up_process(tsk);//唤醒ksoftirqd进程
 }
 
 /*
@@ -320,10 +320,12 @@ void irq_exit(void)
 
 /*
  * This function must run with irqs disabled!
+ 内含__raise_softirq_irqoff的包裹函数，当in_interrupt()返回false时，则唤醒ksoftirqd
+ 主要用于在中断处理函数中触发软中断
  */
 inline void raise_softirq_irqoff(unsigned int nr)
 {
-	__raise_softirq_irqoff(nr);
+	__raise_softirq_irqoff(nr);//设置软中断挂起标志
 
 	/*
 	 * If we're in an interrupt or softirq, we're done
@@ -334,19 +336,20 @@ inline void raise_softirq_irqoff(unsigned int nr)
 	 * Otherwise we wake up ksoftirqd to make sure we
 	 * schedule the softirq soon.
 	 */
-	if (!in_interrupt())
+	if (!in_interrupt())//只能在中断上下文中触发软中断
 		wakeup_softirqd();
 }
 
+//主要用于非中断处理函数中触发软中断，必须先关闭硬中断
 void raise_softirq(unsigned int nr)
 {
 	unsigned long flags;
-
-	local_irq_save(flags);
+	//关闭硬中断是为了防止软中断处理函数中被下一次硬中断再次调用raise_softirq()
+	local_irq_save(flags); //关闭硬中断
 	raise_softirq_irqoff(nr);
-	local_irq_restore(flags);
+	local_irq_restore(flags); //开启硬中断
 }
-
+//注册软中断处理函数，data目前没有用到
 void open_softirq(int nr, void (*action)(struct softirq_action*), void *data)
 {
 	softirq_vec[nr].data = data;
@@ -666,7 +669,7 @@ __init int spawn_ksoftirqd(void)
 
 	BUG_ON(err == NOTIFY_BAD);
 	cpu_callback(&cpu_nfb, CPU_ONLINE, cpu);
-	register_cpu_notifier(&cpu_nfb);
+	register_cpu_notifier(&cpu_nfb);//注册cpu上线和下线“通知连”
 	return 0;
 }
 

@@ -22,7 +22,7 @@
  * into a percpu variable instead of storing softirq_pending
  * on the lowcore */
 typedef struct {
-	unsigned int __softirq_pending;
+	unsigned int __softirq_pending;//挂起的软中断位图
 } irq_cpustat_t;
 
 #define local_softirq_pending() (S390_lowcore.softirq_pending)

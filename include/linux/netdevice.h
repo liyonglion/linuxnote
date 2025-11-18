@@ -306,7 +306,18 @@ struct netdev_boot_setup {
 extern int __init netdev_boot_setup(char *str);
 
 /*
- * Structure for NAPI scheduling similar to tasklet but with weighting
+struct napi_struct 是内核处理软中断的入口，每个net_device都对应一个napi_struct，驱动在硬中断中将自己的napi_struct挂载到CPU的收包队列softnet_data。内核在软中断中轮询该队列，并执行napi_sturct中的回调函数int(*poll)(struct napi_struct *, int);
+
+ Napi就是混合中断和轮询得方式来收包，当有中断来了，驱动关闭中断，通知内核收包，内核软中断轮询当前网卡，在规定得时间尽可能多的收包。时间用尽或者没有收据可收，内核再次开启中断，准备下次收包。
+ 首先采用中断唤醒数据接收的服务程序，然后POLL的方法来轮询数据。
+ NAPI存在的一些比较严重的缺陷：
+	1. 对于上层的应用程序而言，系统不能再每个数据包接收到的时候可以及时地处理它，而是随着传输速度的增加，累计的数据包将会耗费大量的内存。
+	2. 对于大的数据包处理比较困难，原因时大的数据包传送到网络层上的时候耗费的时间比短数据包长很多(即使是才哟个DMA方式),所以正如前面所说的那样，NAPI计数适用于对高速率的短长度数据包的处理。
+要使用NAPI至少要得到下面的保证：
+	1. 设备要有足够的缓冲区，保存多个数据分组。要使用DMA的环形输入队列，或者有足够的内存空间缓存驱动获得的包。
+	2. 可以禁用当前设备的中断，然而不影响其他的操作。在发送/接收数据包产生中断的时候有能力关断 NIC 中断的事件处理，并且在关断 NIC 以后，并不影响数据包接收到网络设备的环形缓冲区（以下简称 rx-ring）处理队列中。
+
+
  */
 struct napi_struct {
 	/* The poll_list must only be managed by the entity which
@@ -315,16 +326,23 @@ struct napi_struct {
 	 * to the per-cpu poll_list, and whoever clears that bit
 	 * can remove from the list right before clearing the bit.
 	 */
-	struct list_head	poll_list;
-
-	unsigned long		state;
-	int			weight;
+	struct list_head	poll_list; //用于将napi_struct加入到softnet_data中的poll_list中
+	/*
+		NAPI_STATE_SCHED,     // 位0: 已调度轮询（在poll_list中）
+		NAPI_STATE_DISABLE,   // 位1: 禁用状态（不可调度）
+		NAPI_STATE_NPSVC,     // 位2: 正在轮询服务中
+		NAPI_STATE_HASHED,    // 位3: 在全局哈希表中（用于快速查找）
+		NAPI_STATE_NO_BUSY_POLL, // 位4: 禁用繁忙轮询
+		NAPI_STATE_IN_BUSY_POLL, // 位5: 处于繁忙轮询中
+	*/
+	unsigned long		state; // 位图，存储NAPI状态标志
+	int			weight; //一次轮询处理的最大数据包数
 	int			(*poll)(struct napi_struct *, int);
 #ifdef CONFIG_NETPOLL
 	spinlock_t		poll_lock;
-	int			poll_owner;
-	struct net_device	*dev;
-	struct list_head	dev_list;
+	int			poll_owner; // 当前持有poll_lock的CPU编号
+	struct net_device	*dev;// 该NAPI实例所属的网络设备
+	struct list_head	dev_list; // 链入到softnet_data中的napi_list的节点
 #endif
 };
 
@@ -841,6 +859,7 @@ static inline void *netdev_priv(const struct net_device *dev)
  * netif_napi_add() must be used to initialize a napi context prior to calling
  * *any* of the other napi related functions.
  */
+//驱动函数在初始化net_device时通过该函数绑定一个napi_struct结构。驱动需要在这里注册软中断中用于轮询的网卡的poll函数
 static inline void netif_napi_add(struct net_device *dev,
 				  struct napi_struct *napi,
 				  int (*poll)(struct napi_struct *, int),
@@ -965,14 +984,27 @@ static inline int unregister_gifconf(unsigned int family)
 /*
  * Incoming packets are placed on per-cpu queues so that
  * no locking is needed.
+ 我们都知道中断分为中断上半部和下半部，上半部完成的任务很是简单，仅仅负责把数据保存下来；而下半部负责具体的处理。为了处理下半部，每个CPU有维护一个softnet_data结构。
+ 结构中有一个poll_list字段，连接所有的轮询设备。
+ 还 维护了两个队列input_pkt_queue和process_queue，这两个用于传统不支持NAPI方式的处理。前者由中断上半部的处理函数把数据包入队，在具体的处理时，使用后者做中转，相当于前者负责接收，后者负责处理。
+ 最后是一个napi_struct的backlog，代表一个虚拟设备供轮询使用。在支持NAPI的设备下，每个设备具备一个缓冲队列，存放到来数据。每个设备对应一个napi_struct结构，该结构代表该设备存放在poll_list中被轮询。而设备还需要提供一个poll函数，在设备被轮询到后，会调用poll函数对数据进行处理。
+ 非API网络设备接收包流程：
+	1. 网卡收到包后，驱动程序产生中断(netif_rx处理函数)，调用enqueue_to_backlog函数将数据包放入input_pkt_queue(如果有多个设备都会存在在这个里面)
+	2. 网卡中断程序触发软中断
+	3. 在process_backlog中处理数据包，上报到内核协议栈
+ 
  */
 struct softnet_data
 {
 	struct net_device	*output_queue;
-	struct sk_buff_head	input_pkt_queue;
-	struct list_head	poll_list;
+	struct sk_buff_head	input_pkt_queue; //这个队列(在net_dev_init中初始化)用来保存进来的帧(被驱动程序处理前)。所有的不支持NAPI设备都会放到这个队列中。
+	struct list_head	poll_list; //支持所有支持poll的设备
 	struct sk_buff		*completion_queue;
-
+	/*
+	NAPI设备均对应一个napi_struct结构，添加到链表中；非NAPI没有对应的napi_struct结构，为了使用NAPI的处理流程，使用了softnet_data结构中的back_log作为一个虚拟设备添加到轮询链表。
+	同时由于非NAPI设备没有各自的接收队列，所以利用了softnet_data结构的input_pkt_queue作为全局的接收队列。这样就处理而言，可以和NAPI的设备进行兼容。
+	但是还有一个重要区别，在NAPI的方式下，首次数据包的接收使用中断的方式，而后续的数据包就会使用轮询处理了；而非NAPI每次都是通过中断通知。
+	*/
 	struct napi_struct	backlog;
 #ifdef CONFIG_NET_DMA
 	struct dma_chan		*net_dma;
