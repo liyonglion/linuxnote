@@ -156,7 +156,7 @@
 
 static DEFINE_SPINLOCK(ptype_lock);
 static struct list_head ptype_base[PTYPE_HASH_SIZE] __read_mostly;
-static struct list_head ptype_all __read_mostly;	/* Taps */
+static struct list_head ptype_all __read_mostly;	/* 需要处理所有包的“协议”,例如tcpdump、wireshark */
 
 #ifdef CONFIG_NET_DMA
 struct net_dma {
@@ -363,9 +363,9 @@ void dev_add_pack(struct packet_type *pt)
 	int hash;
 
 	spin_lock_bh(&ptype_lock);
-	if (pt->type == htons(ETH_P_ALL))
+	if (pt->type == htons(ETH_P_ALL)) //如果是监听所有类型的包，则加入ptype_all 链表，会在netif_receive_skb中调用
 		list_add_rcu(&pt->list, &ptype_all);
-	else {
+	else { //具体某个类型的包，则加入ptype_base[hash]链表，会在netif_receive_skb中调用
 		hash = ntohs(pt->type) & PTYPE_HASH_MASK;
 		list_add_rcu(&pt->list, &ptype_base[hash]);
 	}
@@ -1792,7 +1792,7 @@ DEFINE_PER_CPU(struct netif_rx_stats, netdev_rx_stat) = { 0, };
  *
  */
 /*
-设备驱动函数调用此函数，注意此函数实在硬中断被调用，被调用说明此NIC不支持NAPI。
+设备驱动函数调用此函数，注意此函数实在硬中断被调用，被调用说明此NIC不支持NAPI。需要注意一点：不同的cpu可以同时执行netif_rx，因为每个CPU都配有一个私有的softnet_data结构以维护状态信息
 其中softnet_data作为主导结构，在NAPI的处理方式下，主要维护轮询链表。NAPI设备均对应一个napi_struct结构，添加到链表中；非NAPI没有对应的napi_struct结构，为了使用NAPI的处理流程，使用了softnet_data结构中的back_log作为一个虚拟设备添加到轮询链表。
 同时由于非NAPI设备没有各自的接收队列，所以利用了softnet_data结构的input_pkt_queue作为全局的接收队列。这样就处理而言，可以和NAPI的设备进行兼容。但是还有一个重要区别，在NAPI的方式下，首次数据包的接收使用中断的方式，而后续的数据包就会使用轮询处理了；
 而非NAPI每次都是通过中断通知。
@@ -1806,7 +1806,7 @@ int netif_rx(struct sk_buff *skb)
 	if (netpoll_rx(skb)) //netpoll会处理该数据包。返回1标识该数据包被处理，返回0标识该数据包没有被处理。
 		return NET_RX_DROP;
 
-	if (!skb->tstamp.tv64)
+	if (!skb->tstamp.tv64) //赋值帧接收时间
 		net_timestamp(skb);
 
 	/*
@@ -1816,13 +1816,13 @@ int netif_rx(struct sk_buff *skb)
 	local_irq_save(flags); //关闭硬中断
 	queue = &__get_cpu_var(softnet_data); //获取当前cpu的softnet_data结构体
 
-	__get_cpu_var(netdev_rx_stat).total++;
+	__get_cpu_var(netdev_rx_stat).total++; //更新cpu所接收的数据包总数：包括接收的以及丢弃的
 	if (queue->input_pkt_queue.qlen <= netdev_max_backlog) { //队列长度小于netdev_max_backlog
 		if (queue->input_pkt_queue.qlen) { //如果input_pkt_queue不为空，说明已经得到调度，此时仅仅把数据加入input_pkt_queue队列即可
 enqueue:
-			dev_hold(skb->dev);
+			dev_hold(skb->dev);// 此设备增加引用计数值，使该设备无法被删除，直到此缓冲区已完全处理完为止。相应的递减是由dev_put完成，在net_rx_action内发送
 			__skb_queue_tail(&queue->input_pkt_queue, skb);//添加到input_pkt_queue队列尾部
-			local_irq_restore(flags);
+			local_irq_restore(flags); // 开启本地cpu中断
 			return NET_RX_SUCCESS;
 		}
 		//否则需要调度backlog 即虚拟设备，然后再入队。napi_struct结构中的state字段如果标记了NAPI_STATE_SCHED,则表明该设备已经在调度，不需要再次调度。
@@ -1831,10 +1831,10 @@ enqueue:
 		goto enqueue;
 	}
 
-	__get_cpu_var(netdev_rx_stat).dropped++;
-	local_irq_restore(flags);
+	__get_cpu_var(netdev_rx_stat).dropped++;//更新统计计数
+	local_irq_restore(flags); //开启本地cpu的中断
 
-	kfree_skb(skb);
+	kfree_skb(skb); //释放skb
 	return NET_RX_DROP;
 }
 
@@ -2064,32 +2064,32 @@ int netif_receive_skb(struct sk_buff *skb)
 	__be16 type;
 
 	/* if we've gotten here through NAPI, check netpoll */
-	if (netpoll_receive_skb(skb))
+	if (netpoll_receive_skb(skb))//如果被netpoll处理，则直接丢弃
 		return NET_RX_DROP;
 
-	if (!skb->tstamp.tv64)
+	if (!skb->tstamp.tv64) //如果没有设置net_timestamp，则设置
 		net_timestamp(skb);
 
-	if (!skb->iif)
+	if (!skb->iif) //将skb的input ifindex设置为dev的ifindex，因为这是在收报过程，需要对iif进行设置。用于路由决策
 		skb->iif = skb->dev->ifindex;
-
-	orig_dev = skb_bond(skb);
+	// Bonding可以让一群接口组合起来，视为单一接口。如果帧来来自于这类群组，则sk_buff数据结构中所引用的接收接口必须改为该群组中巨头主设备角色的那个设备，netif_receive_skb才可以把封包传递给L3处理函数
+	orig_dev = skb_bond(skb);// 处理绑定功能
 
 	if (!orig_dev)
 		return NET_RX_DROP;
 
-	__get_cpu_var(netdev_rx_stat).total++;
+	__get_cpu_var(netdev_rx_stat).total++; // 统计报文总数
 
-	skb_reset_network_header(skb);
-	skb_reset_transport_header(skb);
-	skb->mac_len = skb->network_header - skb->mac_header;
+	skb_reset_network_header(skb); //初始化 skb->network_header为当前skb->data
+	skb_reset_transport_header(skb); // 初始化 skb->transport_header为当前skb->data
+	skb->mac_len = skb->network_header - skb->mac_header; // 设置链路层头长度,网络层头开始位置-链路层头开始位置 = 链路层头长度
 
 	pt_prev = NULL;
 
 	rcu_read_lock();
 
 	/* Don't receive packets in an exiting network namespace */
-	if (!net_alive(dev_net(skb->dev)))
+	if (!net_alive(dev_net(skb->dev))) // 判断网络空间是否存活
 		goto out;
 
 #ifdef CONFIG_NET_CLS_ACT
@@ -2098,11 +2098,12 @@ int netif_receive_skb(struct sk_buff *skb)
 		goto ncls;
 	}
 #endif
-
+	//ptype_all 是ETH_P_ALL 的链表头，表示需要处理所有的包。例如用于抓包和监控（如 tcpdump、Wireshark）
+	//这里没有搞懂为什么会有pt_prev用于延迟一个调用？，最后一个pt_prev在后续流程进行处理
 	list_for_each_entry_rcu(ptype, &ptype_all, list) {
 		if (!ptype->dev || ptype->dev == skb->dev) {
 			if (pt_prev)
-				ret = deliver_skb(skb, pt_prev, orig_dev);
+				ret = deliver_skb(skb, pt_prev, orig_dev); //继续处理报文
 			pt_prev = ptype;
 		}
 	}
@@ -2113,14 +2114,15 @@ int netif_receive_skb(struct sk_buff *skb)
 		goto out;
 ncls:
 #endif
-
+	//该帧是否应该被桥接处理？ 返回NUll标识被桥接处理
 	skb = handle_bridge(skb, &pt_prev, &ret, orig_dev);
 	if (!skb)
 		goto out;
+	//该帧是否应该被MACVLAN处理？虚拟化环境中的网络隔离，单个物理接口支持多个MAC地址。容器网络的基础技术
 	skb = handle_macvlan(skb, &pt_prev, &ret, orig_dev);
 	if (!skb)
 		goto out;
-
+	// 调用pt_prev保存的ETH_P_ALL的处理。具体的协议在后续继续处理。
 	type = skb->protocol;
 	list_for_each_entry_rcu(ptype,
 			&ptype_base[ntohs(type) & PTYPE_HASH_MASK], list) {
@@ -2131,10 +2133,10 @@ ncls:
 			pt_prev = ptype;
 		}
 	}
-
-	if (pt_prev) {
+	//具体的协议在这处理
+	if (pt_prev) { // 提交到上层协议继续处理，例如ip_rcv函数
 		ret = pt_prev->func(skb, skb->dev, pt_prev, orig_dev);
-	} else {
+	} else { //没有协议处理，直接丢弃
 		kfree_skb(skb);
 		/* Jamal, now you will not able to escape explaining
 		 * me how you were going to use this. :-)
@@ -2147,6 +2149,7 @@ out:
 	return ret;
 }
 /*
+process_backlog管理一大群共享同一个入口队列的设备。当process_backlog运行时，硬件中断是开启的，所以此函数可以被 中断打断也就是可以被抢占。
 函数还是比较简单的，需要注意的每次处理都携带一个配额，即本次只能处理quota个数据包，如果超额了，即使没处理完也要返回，这是为了保证处理器的公平使用。处理在一个while循环中完成，循环条件正是work < quota，首先会从input_pkt_queue中取出skb,调用netif_receive_skb上传给协议栈，
 然后增加work。当work即将大于quota时，即++work >= quota时，就要返回
 */
@@ -2161,21 +2164,21 @@ static int process_backlog(struct napi_struct *napi, int quota)
 		struct sk_buff *skb;
 		struct net_device *dev;
 
-		local_irq_disable();
-		skb = __skb_dequeue(&queue->input_pkt_queue);
+		local_irq_disable(); // 禁止中断
+		skb = __skb_dequeue(&queue->input_pkt_queue); // 从队列中取出一个skb
 		if (!skb) {
-			__napi_complete(napi);
-			local_irq_enable();
+			__napi_complete(napi); // 队列为空了，从当前cpu的softnet_data中删除该napi，并清除NAPI_STATE_SCHED标志
+			local_irq_enable(); // 允许中断
 			break;
 		}
 
-		local_irq_enable();
+		local_irq_enable(); // 允许中断
 
 		dev = skb->dev;
 
-		netif_receive_skb(skb);
+		netif_receive_skb(skb); // 上报协议栈处理
 
-		dev_put(dev);
+		dev_put(dev); // 释放设备引用
 	} while (++work < quota && jiffies == start_time);
 
 	return work;

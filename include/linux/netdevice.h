@@ -370,8 +370,8 @@ static inline int napi_disable_pending(struct napi_struct *n)
  */
 static inline int napi_schedule_prep(struct napi_struct *n)
 {
-	return !napi_disable_pending(n) &&
-		!test_and_set_bit(NAPI_STATE_SCHED, &n->state);
+	return !napi_disable_pending(n) && // 没有关闭napi
+		!test_and_set_bit(NAPI_STATE_SCHED, &n->state); // 标识napi正在运行
 }
 
 /**
@@ -384,7 +384,7 @@ static inline int napi_schedule_prep(struct napi_struct *n)
 static inline void napi_schedule(struct napi_struct *n)
 {
 	if (napi_schedule_prep(n))
-		__napi_schedule(n);
+		__napi_schedule(n); //将napi加入到当前cpu的softnet_data中，并开启软中断
 }
 
 /* Try to reschedule poll. Called by dev->poll() after napi_complete().  */
@@ -782,7 +782,7 @@ struct net_device
 	/* mid-layer private */
 	void			*ml_priv;
 
-	/* bridge stuff 当此设备配置生成桥接端口时，就需要额外的信息*/
+	/* bridge stuff 当此设备配置生成桥接端口时，存储桥接端口所需的额外信息。没有开启桥接功能时，其值为NULL*/
 	struct net_bridge_port	*br_port;
 	/* macvlan */
 	struct macvlan_port	*macvlan_port;
@@ -876,19 +876,19 @@ static inline void netif_napi_add(struct net_device *dev,
 #endif
 	set_bit(NAPI_STATE_SCHED, &napi->state);
 }
-//网络层向链路层注册处理函数。链路层通过func通知网络层数据包
+//网络层向链路层注册处理函数。链路层通过func通知网络层数据包。用于将数据包分发到相应的协议栈（如 IP、ARP、IPv6 等）
 struct packet_type {
 	__be16			type;	/* This is really htons(ether_type). 链路头中的Type类型*/
-	struct net_device	*dev;	/* NULL is wildcarded here	     */
-	int			(*func) (struct sk_buff *,
-					 struct net_device *,
-					 struct packet_type *,
-					 struct net_device *);
+	struct net_device	*dev;	/* NULL is wildcarded here	 限制只处理特定网络设备的数据包。    */
+	int			(*func) (struct sk_buff *, // 数据包
+					 struct net_device *, // 接收设备
+					 struct packet_type *, // 当前处理的packet_type
+					 struct net_device *); // 原始设备(例如 bonding)
 	struct sk_buff		*(*gso_segment)(struct sk_buff *skb,
-						int features);
-	int			(*gso_send_check)(struct sk_buff *skb);
-	void			*af_packet_priv;
-	struct list_head	list;
+						int features); // 支持协议特定的分段卸载
+	int			(*gso_send_check)(struct sk_buff *skb); // 发送前检查
+	void			*af_packet_priv; //存储私有数据指针
+	struct list_head	list; // 用于将packet_type添加到ptypeAll链表
 };
 
 #include <linux/interrupt.h>
@@ -997,7 +997,7 @@ static inline int unregister_gifconf(unsigned int family)
 struct softnet_data
 {
 	struct net_device	*output_queue;
-	struct sk_buff_head	input_pkt_queue; //这个队列(在net_dev_init中初始化)用来保存进来的帧(被驱动程序处理前)。所有的不支持NAPI设备都会放到这个队列中。
+	struct sk_buff_head	input_pkt_queue; //这个队列(在net_dev_init中初始化)用来保存进来的帧(被驱动程序处理前)。所有的不支持NAPI设备都会放到这个队列中。每个输入队列都有最大长度限制，由全局变量netdev_max_backlog指定，其值为300，也就是烁，每个cpu的输入队列钟最多智能有300个帧待处理。
 	struct list_head	poll_list; //支持所有支持poll的设备
 	struct sk_buff		*completion_queue;
 	/*
