@@ -22,7 +22,11 @@ struct qdisc_rate_table
 	struct qdisc_rate_table *next;
 	int		refcnt;
 };
-
+/*
+流量控制系统包含几组不同的 queue system，每种有不同的排队特征。各个排队系统通常称为 qdisc，也称为排队规则。可以将 qdisc 视为调度程序， qdisc 决定数据包的发送时间和方式。
+Linux 上每个 device 都有一个与之关联的默认 qdisc。对于仅支持单发送队列的网卡，使用默认的 qdisc pfifo_fast。支持多个发送队列的网卡使用 mq 的默认 qdisc。可以运行 tc qdisc 来查看系统 qdisc 信息。
+某些设备支持硬件流量控制，这允许管理员将流量控制 offload 到网络硬件，节省系统的 CPU 资源。
+*/
 struct Qdisc
 {
 	int 			(*enqueue)(struct sk_buff *skb, struct Qdisc *dev);

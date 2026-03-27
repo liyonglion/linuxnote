@@ -1293,19 +1293,19 @@ static void dev_queue_xmit_nit(struct sk_buff *skb, struct net_device *dev)
 	rcu_read_unlock();
 }
 
-
 void __netif_schedule(struct net_device *dev)
 {
-	if (!test_and_set_bit(__LINK_STATE_SCHED, &dev->state)) {
+	//如果设备已经进入__LINK_STATE_SCHED则直接返回
+	if (!test_and_set_bit(__LINK_STATE_SCHED, &dev->state)) { // 将dev->state |= __LINK_STATE_SCHED;__LINK_STATE_SCHED中来表示该设备已经位于output_queue列表中，因为那些设备有数据要传输
 		unsigned long flags;
-		struct softnet_data *sd;
+		struct softnet_data *sd; 
 
-		local_irq_save(flags);
-		sd = &__get_cpu_var(softnet_data);
+		local_irq_save(flags); // 关硬中断
+		sd = &__get_cpu_var(softnet_data); //获取当前cpu的 softnet_data结构体
 		dev->next_sched = sd->output_queue;
-		sd->output_queue = dev;
-		raise_softirq_irqoff(NET_TX_SOFTIRQ);
-		local_irq_restore(flags);
+		sd->output_queue = dev; //将设备添加到output_queue头部。
+		raise_softirq_irqoff(NET_TX_SOFTIRQ); // 触发软中断
+		local_irq_restore(flags); // 打开硬中断
 	}
 }
 EXPORT_SYMBOL(__netif_schedule);
@@ -1637,7 +1637,10 @@ out_kfree_skb:
  *      the BH enable code must have IRQs enabled so that it will not deadlock.
  *          --BLG
  */
-
+/*
+	dev_queue_xmit对于出口路径的角色就如同netif_rx对入口路径一样，都是在驱动程序的缓冲区和内核的队列之间传输帧。
+	当设备等待传输某些数据以及对那些不再需要缓冲区做清扫工作时，net_tx_action函数就会被调用。
+*/
 int dev_queue_xmit(struct sk_buff *skb)
 {
 	struct net_device *dev = skb->dev;//取得网络设备结构
@@ -1697,15 +1700,15 @@ gso:
 #ifdef CONFIG_NET_CLS_ACT
 	skb->tc_verd = SET_TC_AT(skb->tc_verd,AT_EGRESS);
 #endif
-	if (q->enqueue) {//如果指定了人队函数
+	if (q->enqueue) {//网卡支持qdisc
 		/* Grab device queue */
 		spin_lock(&dev->queue_lock);
 		q = dev->qdisc;
-		if (q->enqueue) {
+		if (q->enqueue) { 
 			/* reset queue_mapping to zero */
 			skb_set_queue_mapping(skb, 0);//多队列情况下,设置当前队列号
 			rc = q->enqueue(skb, q);//执行人队函数
-			qdisc_run(dev);//调用排队规则的发送函数
+			qdisc_run(dev);//调用排队规则的发送函数，将包发送给下一层
 			spin_unlock(&dev->queue_lock);
 
 			rc = rc == NET_XMIT_BYPASS ? NET_XMIT_SUCCESS : rc;

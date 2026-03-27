@@ -1180,7 +1180,7 @@ static int __sock_create(struct net *net, int family, int type, int protocol,
 
 	/* Now protected by module ref count */
 	rcu_read_unlock();
-	//创建对应type类型的struct sock,也就是TCP层的sock。AF_NET的create是inet_create
+	//创建对应type类型的struct sock,也就是TCP层的sock。AF_NET的create是 inet_create
 	//net 为当前网络命名空间，pf为协议族类型，protocol为协议类型
 	err = pf->create(net, sock, protocol);
 	if (err < 0)
@@ -1530,7 +1530,7 @@ asmlinkage long sys_connect(int fd, struct sockaddr __user *uservaddr,
 		goto out_put;
 
 	err = sock->ops->connect(sock, (struct sockaddr *)address, addrlen,
-				 sock->file->f_flags);//调用	具体的协议族connect函数，即inet_stream_connect
+				 sock->file->f_flags);//调用	具体的协议族connect函数，即 inet_stream_connect
 out_put:
 	fput_light(sock->file, fput_needed);
 out:

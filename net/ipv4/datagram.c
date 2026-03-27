@@ -63,14 +63,14 @@ int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 		return -EACCES;
 	}
 	//重新设置套接字中的地址信息
-	if (!inet->saddr)
+	if (!inet->saddr) //源地址未设置
 		inet->saddr = rt->rt_src;	/* Update source address */
 	if (!inet->rcv_saddr)
 		inet->rcv_saddr = rt->rt_src;
-	inet->daddr = rt->rt_dst;
-	inet->dport = usin->sin_port;
+	inet->daddr = rt->rt_dst; //目标地址
+	inet->dport = usin->sin_port; //目标端口
 	//设置套接字状态为TCP_ESTABLISHED，表示已经缓存了路由信息
-	sk->sk_state = TCP_ESTABLISHED;
+	sk->sk_state = TCP_ESTABLISHED; //套接字状态为TCP_ESTABLISHED
 	inet->id = jiffies;
 	// 为套接字设置路由缓存信息
 	sk_dst_set(sk, &rt->u.dst);

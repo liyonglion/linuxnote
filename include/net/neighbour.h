@@ -338,18 +338,29 @@ static inline int neigh_hh_output(struct hh_cache *hh, struct sk_buff *skb)
 {
 	unsigned seq;
 	int hh_len;
-
+	/*
+	序列锁工作方式：
+		写入者：获取锁 → 修改数据 → 增加序列号
+		读取者：检查序列号 → 读取数据 → 验证序列号未变化
+	网络数据路径特点：
+		读取频率 >> 写入频率
+		写入操作很少（邻居状态变化时）
+		需要极低的读取延迟
+	*/
 	do {
 		int hh_alen;
-
+		// 1. 开始无锁读取序列
 		seq = read_seqbegin(&hh->hh_lock);
+		//获取头长度和对齐长度
 		hh_len = hh->hh_len;
 		hh_alen = HH_DATA_ALIGN(hh_len);
+		// 赋值L2 头到数据包中
 		memcpy(skb->data - hh_alen, hh->hh_data, hh_alen);
-	} while (read_seqretry(&hh->hh_lock, seq));
-
+	} while (read_seqretry(&hh->hh_lock, seq));// 检查读取期间是否有写入(序列锁变化)
+	// 调整skb数据包长度（包含L2头）
 	skb_push(skb, hh_len);
-	return hh->hh_output(skb);
+	// 调用L2输出函数
+	return hh->hh_output(skb); // 实际上是dev_queue_xmit
 }
 
 static inline struct neighbour *

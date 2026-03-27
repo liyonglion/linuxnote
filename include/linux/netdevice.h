@@ -676,7 +676,7 @@ struct net_device
  */
 	/* device queue lock */
 	spinlock_t		queue_lock ____cacheline_aligned_in_smp;
-	struct Qdisc		*qdisc;
+	struct Qdisc		*qdisc; //流量控制
 	struct Qdisc		*qdisc_sleeping;
 	struct list_head	qdisc_list;
 	unsigned long		tx_queue_len;	/* Max frames per queue allowed */
@@ -996,7 +996,7 @@ static inline int unregister_gifconf(unsigned int family)
  */
 struct softnet_data
 {
-	struct net_device	*output_queue;
+	struct net_device	*output_queue;//代表的是一个设备列表，其中的设备有数据要发送
 	struct sk_buff_head	input_pkt_queue; //这个队列(在net_dev_init中初始化)用来保存进来的帧(被驱动程序处理前)。所有的不支持NAPI设备都会放到这个队列中。每个输入队列都有最大长度限制，由全局变量netdev_max_backlog指定，其值为300，也就是烁，每个cpu的输入队列钟最多智能有300个帧待处理。
 	struct list_head	poll_list; //支持所有支持poll的设备
 	struct sk_buff		*completion_queue;
@@ -1017,6 +1017,7 @@ DECLARE_PER_CPU(struct softnet_data,softnet_data);
 
 extern void __netif_schedule(struct net_device *dev);
 
+//确保设备调度传输前该设备的传输功能已开启。
 static inline void netif_schedule(struct net_device *dev)
 {
 	if (!test_bit(__LINK_STATE_XOFF, &dev->state))
@@ -1028,10 +1029,11 @@ static inline void netif_schedule(struct net_device *dev)
  *	@dev: network device
  *
  *	Allow upper layers to call the device hard_start_xmit routine.
+ 开启设备的传输。当设备启动时通常会调用此函数。如果必须重启已经停止的设备时，也可以再次调用。
  */
 static inline void netif_start_queue(struct net_device *dev)
 {
-	clear_bit(__LINK_STATE_XOFF, &dev->state);
+	clear_bit(__LINK_STATE_XOFF, &dev->state); //清除设备的__LINK_STATE_XOFF状态
 }
 
 /**
@@ -1040,6 +1042,8 @@ static inline void netif_start_queue(struct net_device *dev)
  *
  *	Allow upper layers to call the device hard_start_xmit routine.
  *	Used for flow control when transmit resources are available.
+ 开启该设备的传输，而且如果先前传输已经关闭，就为设备调度以准备传输，因为该设备被关闭时可能有部分没有传输。
+ 该函数视为设备驱动准备的，因为驱动程序在必要时会关闭和重启队列，为了应付内存不足的情况。
  */
 static inline void netif_wake_queue(struct net_device *dev)
 {
@@ -1059,10 +1063,12 @@ static inline void netif_wake_queue(struct net_device *dev)
  *
  *	Stop upper layers calling the device hard_start_xmit routine.
  *	Used for flow control when transmit resources are unavailable.
+ 关闭设备的传输。任何企图在设备上传输信息的尝试都将被拒绝。
+ 设备为什么要停止？原因之一时设备可能暂时耗尽内存，使得传输尝试失败。当设备驱动程序了解到没有足够空间以存储一个最大尺寸（MTU）d的帧时，就会调用该函数停止出口队列。就可以避免后续的传输而浪费资源。
  */
 static inline void netif_stop_queue(struct net_device *dev)
 {
-	set_bit(__LINK_STATE_XOFF, &dev->state);
+	set_bit(__LINK_STATE_XOFF, &dev->state); //设置设备的__LINK_STATE_XOFF状态
 }
 
 /**
@@ -1070,6 +1076,7 @@ static inline void netif_stop_queue(struct net_device *dev)
  *	@dev: network device
  *
  *	Test if transmit queue on device is currently unable to send.
+ 测试设备出口队列是否关闭状态
  */
 static inline int netif_queue_stopped(const struct net_device *dev)
 {

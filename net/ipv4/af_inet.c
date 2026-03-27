@@ -366,7 +366,7 @@ lookup_protocol:
 		sk->sk_reuse = 1;
 	//初始化struct inet_sock，inet_sock是IPv4/IPv6 基础层
 	inet = inet_sk(sk);
-	inet->is_icsk = (INET_PROTOSW_ICSK & answer_flags) != 0;//标识是inet_connection_sock类型，标识子对象是否是inet_connection_sock类型
+	inet->is_icsk = (INET_PROTOSW_ICSK & answer_flags) != 0;//标识是 inet_connection_sock 类型，标识子对象是否是inet_connection_sock类型
 
 	if (SOCK_RAW == sock->type) {
 		inet->num = protocol;
@@ -596,7 +596,7 @@ int inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 		sock->state = err ? SS_DISCONNECTING : SS_UNCONNECTED;
 		goto out;
 	}
-
+	// 在创建socket的时候，会设置socket状态为SS_UNCONNECTED,但是sock为TCP_CLOSE
 	switch (sock->state) {//判断socket状态。
 	default:
 		err = -EINVAL;
@@ -612,7 +612,7 @@ int inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 		err = -EISCONN;
 		if (sk->sk_state != TCP_CLOSE)//调用connect只能是创建socket，所以状态必须是TCP_CLOSE
 			goto out;
-		//调用tcp层的connect函数。tcp_v4_connect()
+		//调用tcp层的connect函数。tcp调用 tcp_v4_connect() ，udp调用 ip4_datagram_connect
 		err = sk->sk_prot->connect(sk, uaddr, addr_len);
 		if (err < 0)
 			goto out;
@@ -731,7 +731,7 @@ int inet_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 	/* We may need to bind the socket. */
 	if (!inet_sk(sk)->num && inet_autobind(sk))
 		return -EAGAIN;
-	//调用传输层的数据发送方法:tcp_sendmsg
+	//调用传输层的数据发送方法:tcp_sendmsg 或者 udp_sendmsg 
 	return sk->sk_prot->sendmsg(iocb, sk, msg, size);
 }
 

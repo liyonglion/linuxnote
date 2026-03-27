@@ -143,8 +143,8 @@ static inline int qdisc_restart(struct net_device *dev)
 	int ret = NETDEV_TX_BUSY;
 
 	/* Dequeue packet */
-	if (unlikely((skb = dev_dequeue_skb(dev, q)) == NULL))
-		return 0;
+	if (unlikely((skb = dev_dequeue_skb(dev, q)) == NULL)) // 从排队队列中取出一个包
+		return 0; //如果队列为空，返回0，将导致上层的qdisc_restart()返回false，继而退出while循环
 
 
 	/* And release queue */
@@ -152,7 +152,7 @@ static inline int qdisc_restart(struct net_device *dev)
 
 	HARD_TX_LOCK(dev, smp_processor_id());
 	if (!netif_subqueue_stopped(dev, skb))
-		ret = dev_hard_start_xmit(skb, dev);
+		ret = dev_hard_start_xmit(skb, dev);// 
 	HARD_TX_UNLOCK(dev);
 
 	spin_lock(&dev->queue_lock);
@@ -186,7 +186,7 @@ void __qdisc_run(struct net_device *dev)
 {
 	unsigned long start_time = jiffies;
 
-	while (qdisc_restart(dev)) {
+	while (qdisc_restart(dev)) { //从队列取出一个skb并发送，队列不为空时返回非零
 		if (netif_queue_stopped(dev))
 			break;
 
@@ -194,6 +194,9 @@ void __qdisc_run(struct net_device *dev)
 		 * Postpone processing if
 		 * 1. another process needs the CPU;
 		 * 2. we've been doing it for too long.
+		 如果发生下面情况，触发软中断 NET_TX_SOFTIRQ
+		 	1. 需要被调度让其他程序程序执行
+			2. 运行时间超过1 jiffy
 		 */
 		if (need_resched() || jiffies != start_time) {
 			netif_schedule(dev);

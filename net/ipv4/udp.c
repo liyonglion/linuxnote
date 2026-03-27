@@ -485,7 +485,7 @@ static int udp_push_pending_frames(struct sock *sk)
 	struct sk_buff *skb;
 	struct udphdr *uh;
 	int err = 0;
-	int is_udplite = IS_UDPLITE(sk);
+	int is_udplite = IS_UDPLITE(sk); //DP-Lite 是标准 UDP 协议的扩展，通过允许部分数据校验来提供对部分数据损坏的容忍性
 	__wsum csum = 0;
 
 	/* Grab the skbuff where UDP header space exists. */
@@ -495,7 +495,7 @@ static int udp_push_pending_frames(struct sock *sk)
 	/*
 	 * Create a UDP header
 	 */
-	//为数据包设置UDP头信息：源端口、目标端口和长度
+	//为数据包准备UDP头信息：源端口、目标端口和长度
 	uh = udp_hdr(skb);
 	uh->source = fl->fl_ip_sport;
 	uh->dest = fl->fl_ip_dport;
@@ -505,27 +505,27 @@ static int udp_push_pending_frames(struct sock *sk)
 	if (is_udplite)  				 /*     UDP-Lite      */
 		csum  = udplite_csum_outgoing(sk, skb);
 
-	else if (sk->sk_no_check == UDP_CSUM_NOXMIT) {   /* UDP csum disabled 如果不需要校验和计算，直接发送数据包*/
+	else if (sk->sk_no_check == UDP_CSUM_NOXMIT) {   /* UDP csum disabled 用户通过setsockopt设置了SO_NO_CHECK不需要校验和计算，直接发送数据包*/
 
 		skb->ip_summed = CHECKSUM_NONE;
 		goto send;
 
-	} else if (skb->ip_summed == CHECKSUM_PARTIAL) { /* UDP hardware csum */
+	} else if (skb->ip_summed == CHECKSUM_PARTIAL) { /* UDP hardware csum  UDP硬件校验和 */
 
 		udp4_hwcsum_outgoing(sk, skb, fl->fl4_src,fl->fl4_dst, up->len);
 		goto send;
 
-	} else						 /*   `normal' UDP    */
+	} else						 /*   `normal' UDP  正常情况下 UDP校验和  */
 		csum = udp_csum_outgoing(sk, skb);
 
 	/* add protocol-dependent pseudo-header */
 	uh->check = csum_tcpudp_magic(fl->fl4_src, fl->fl4_dst, up->len,
 				      sk->sk_protocol, csum             );
-	if (uh->check == 0)
+	if (uh->check == 0) //如果校验和为0，则根据RFC 768将等效补码设置为校验和
 		uh->check = CSUM_MANGLED_0;
 
 send:
-	err = ip_push_pending_frames(sk);
+	err = ip_push_pending_frames(sk); //发送数据包，投递到IP层
 out:
 	up->len = 0;
 	up->pending = 0;
@@ -540,7 +540,7 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	struct inet_sock *inet = inet_sk(sk);//获取ip层的信息
 	struct udp_sock *up = udp_sk(sk); //获取udp层信息
 	int ulen = len;
-	struct ipcm_cookie ipc;
+	struct ipcm_cookie ipc; //通过msg->msg_control的消息将解析放入到ipc中
 	struct rtable *rt = NULL; //路由表信息
 	int free = 0;
 	int connected = 0;
@@ -564,9 +564,9 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	if (msg->msg_flags&MSG_OOB)	/* Mirror BSD error message compatibility */
 		return -EOPNOTSUPP;
 
-	ipc.opt = NULL;
+	ipc.opt = NULL; //ip选项赋值为NULL
 	
-	if (up->pending) {
+	if (up->pending) { //如果是处于cork状态，则直接追加数据
 		/*
 		 * There are pending frames.
 		 * The socket lock must be held while it's corked.
@@ -577,17 +577,18 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 				release_sock(sk);
 				return -EINVAL;
 			}
-			goto do_append_data;
+			goto do_append_data; 
 		}
 		release_sock(sk);
 	}
-	ulen += sizeof(struct udphdr);
+	ulen += sizeof(struct udphdr); //加上udp长度
 
 	/*
 	 *	Get and verify the address.
 	 * 通过检查struct msghdr结构的msg_name字段，确定目的地址是否合法
+	 * 首先判断用户是否指定了目地址，如果用户没有指定目的地址，则从inet(ip层信息)中获取目的ip地址和端口号
 	 */
-	if (msg->msg_name) {
+	if (msg->msg_name) { //用户指定了目的地址和端口,此时connected不能为1，因为缓存的路由可能是错误的
 		struct sockaddr_in * usin = (struct sockaddr_in*)msg->msg_name;
 		if (msg->msg_namelen < sizeof(*usin))
 			return -EINVAL;
@@ -600,7 +601,7 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		dport = usin->sin_port; //目的端口
 		if (dport == 0)
 			return -EINVAL;
-	} else {// 走到这个位置，说明套接字是已经连接的
+	} else {// 走到这个位置，说明套接字是已经连接的，因为前面调用connect函数
 		if (sk->sk_state != TCP_ESTABLISHED) //判断套接字是否已经连接
 			return -EDESTADDRREQ;
 		daddr = inet->daddr; //从inet(ip层信息)中获取目的ip地址
@@ -612,8 +613,8 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	}
 	ipc.addr = inet->saddr; //源ip地址
 
-	ipc.oif = sk->sk_bound_dev_if;
-	//如果是控制报文，通过ip_cmsg_send处理控制报文
+	ipc.oif = sk->sk_bound_dev_if; //输出网卡索引
+	//如果是控制报文，通过ip_cmsg_send处理控制报文：例如可以发送IP_PKTINFO，来“控制”指定发送的报文的源地址
 	if (msg->msg_controllen) {
 		err = ip_cmsg_send(sock_net(sk), msg, &ipc);
 		if (err)
@@ -622,12 +623,12 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 			free = 1;
 		connected = 0;
 	}
-	if (!ipc.opt)
+	if (!ipc.opt) // 如果用户通过IP_RETOPTS设置了IP选项，则直接使用用户设置的选项，否则使用ip层信息中的ip选项
 		ipc.opt = inet->opt;//赋值ip层信息中的ip选项给ipc.opt
 
-	saddr = ipc.addr;
+	saddr = ipc.addr; //源ip地址
 	ipc.addr = faddr = daddr;
-
+	//函数检查是否设置了源记录路由（SRR） IP选项，则第一跳的路由地址保存在faddr中
 	if (ipc.opt && ipc.opt->srr) {
 		if (!daddr)
 			return -EINVAL;
@@ -637,28 +638,28 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	//获取tos
 	tos = RT_TOS(inet->tos);
 	//确定是否需要路由信息
-	if (sock_flag(sk, SOCK_LOCALROUTE) ||
-	    (msg->msg_flags & MSG_DONTROUTE) ||
-	    (ipc.opt && ipc.opt->is_strictroute)) {
-		tos |= RTO_ONLINK;
+	if (sock_flag(sk, SOCK_LOCALROUTE) || // 通过setsockopt 设置了 SO_DONTROUTE
+	    (msg->msg_flags & MSG_DONTROUTE) || // 通过sendto or sendmsg 指定了MSG_DONTROUTE
+	    (ipc.opt && ipc.opt->is_strictroute)) {//严格路由
+		tos |= RTO_ONLINK; //由标志：仅在本地链路发送
 		connected = 0;
 	}
-
+	// 检查目的ip地址是否为组播地址
 	if (ipv4_is_multicast(daddr)) {
 		if (!ipc.oif)
-			ipc.oif = inet->mc_index;
+			ipc.oif = inet->mc_index; //获取组播索引
 		if (!saddr)
-			saddr = inet->mc_addr;
+			saddr = inet->mc_addr; //将源地址设置成组播地址
 		connected = 0;
 	}
 	//如果已经建立套接字连接，则不需要重新查询路由，直接从套接字的管理结构中返回路由信息，记录到rt中
 	if (connected)
-		rt = (struct rtable*)sk_dst_check(sk, 0);
+		rt = (struct rtable*)sk_dst_check(sk, 0); //如果路由信息过期了，也会返回NULL
 	//对尚无路由信息的套接字，需要调用ip_route_output_flow查询路由表，得到路由信息。struct flow结构记录了查找路由表的索引信息
 	if (rt == NULL) {
-		struct flowi fl = { .oif = ipc.oif,
+		struct flowi fl = { .oif = ipc.oif, //输出网卡索引
 				    .nl_u = { .ip4_u =
-					      { .daddr = faddr,
+					      { .daddr = faddr, // 目的ip地址，对于严格路由模式，表示的吓一跳地址
 						.saddr = saddr,
 						.tos = tos } },
 				    .proto = sk->sk_protocol,
@@ -670,26 +671,30 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		//函数dst_output用到的skb->dst->output指针，比如指向ip_output;函数dev_queue_xmit用到的dev->hard_start_xmit指针，比如指向网络设备驱动程序的发送函数
 		err = ip_route_output_flow(sock_net(sk), &rt, &fl, sk, 1);
 		if (err) {
-			if (err == -ENETUNREACH)
-				IP_INC_STATS_BH(IPSTATS_MIB_OUTNOROUTES);
+			if (err == -ENETUNREACH)//目的ip地址不可达
+				IP_INC_STATS_BH(IPSTATS_MIB_OUTNOROUTES); // NOROUTES计数器
 			goto out;
 		}
 
 		err = -EACCES;
-		if ((rt->rt_flags & RTCF_BROADCAST) &&
+		if ((rt->rt_flags & RTCF_BROADCAST) && // 路由指示是广播，并且套接字没有设置SOCK_BROADCAST，则返回错误
 		    !sock_flag(sk, SOCK_BROADCAST))
 			goto out;
-		if (connected)
+		if (connected) // 缓存最新的路由信息
 			sk_dst_set(sk, dst_clone(&rt->u.dst));//令sk的dst字段指向rt->u.dst,缓存路由信息
 	}
-
+	/*
+	当发送 UDP 数据报时，系统会检查本地 ARP 缓存中是否有目标主机的 MAC 地址
+	如果缓存中没有，会发送 ARP 请求来获取目标 MAC 地址
+	MSG_CONFIRM告诉内核这次发送应该确认 ARP 表项是有效的，从而避免在短时间内重复进行 ARP 查询
+	*/
 	if (msg->msg_flags&MSG_CONFIRM)
 		goto do_confirm;
 back_from_confirm:
 
 	saddr = rt->rt_src;//源ip地址
 	if (!ipc.addr)
-		daddr = ipc.addr = rt->rt_dst; //目的ip地址
+		daddr = ipc.addr = rt->rt_dst; //下一条ip地址
 
 	lock_sock(sk);
 	if (unlikely(up->pending)) {
@@ -703,6 +708,7 @@ back_from_confirm:
 	}
 	/*
 	 *	Now cork the socket to pend data.
+	 保存IP头信息
 	 */
 	inet->cork.fl.fl4_dst = daddr;
 	inet->cork.fl.fl_ip_dport = dport;
@@ -717,13 +723,13 @@ do_append_data:
 	err = ip_append_data(sk, getfrag, msg->msg_iov, ulen,
 			sizeof(struct udphdr), &ipc, rt,
 			corkreq ? msg->msg_flags|MSG_MORE : msg->msg_flags);
-	if (err)
-		udp_flush_pending_frames(sk);
-	else if (!corkreq)
+	if (err) //出现了错误
+		udp_flush_pending_frames(sk);//强制删除所有待发送的UDP数据包
+	else if (!corkreq)//没有corkreq(用户明确告诉内核不要cork)，则立即发送数据包
 		//上层应用指定flag为MSG_MORE时，corkrq = 1。ip_append_data之后不会马上调用udp_push_pending_frames执行ip_push_pending_frames。
 		//否则，ip_append_data之后马上执行ip_push_pending_frames把包从队列中发送出去
 		err = udp_push_pending_frames(sk);
-	else if (unlikely(skb_queue_empty(&sk->sk_write_queue)))
+	else if (unlikely(skb_queue_empty(&sk->sk_write_queue)))//队列为空，将套接字标记为不再插入
 		up->pending = 0;
 	release_sock(sk);
 
@@ -746,8 +752,8 @@ out:
 	return err;
 
 do_confirm:
-	dst_confirm(&rt->u.dst);
-	if (!(msg->msg_flags&MSG_PROBE) || len)
+	dst_confirm(&rt->u.dst); //dst_confirm函数只是在目标缓存项上设置一个标志，该标志将在很久以后查询邻居缓存并找到条目时进行检查。
+	if (!(msg->msg_flags&MSG_PROBE) || len) //MSG_PROBE： 探测网络路径的 MTU 而不实际发送数据
 		goto back_from_confirm;
 	err = 0;
 	goto out;

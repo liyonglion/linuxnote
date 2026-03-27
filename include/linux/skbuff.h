@@ -313,7 +313,7 @@ struct sk_buff {
 
 	int			iif;
 #ifdef CONFIG_NETDEVICES_MULTIQUEUE
-	__u16			queue_mapping;
+	__u16			queue_mapping; //出设备的队列映射索引
 #endif
 #ifdef CONFIG_NET_SCHED
 	__u16			tc_index;	/* traffic control index */

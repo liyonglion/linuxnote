@@ -72,7 +72,7 @@ struct rtable
 	__u16			rt_type;
 
 	__be32			rt_dst;	/* Path destination 目的地址	*/
-	__be32			rt_src;	/* Path source源地址		*/
+	__be32			rt_src;	/* Path source优选源地址，多网卡下		*/
 	int			rt_iif; //入端口
 
 

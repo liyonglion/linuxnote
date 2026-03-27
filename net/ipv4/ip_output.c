@@ -184,7 +184,7 @@ static inline int ip_finish_output2(struct sk_buff *skb)
 {
 	struct dst_entry *dst = skb->dst;//获取路由项指针
 	struct rtable *rt = (struct rtable *)dst;
-	struct net_device *dev = dst->dev;//取得网络设备指针
+	struct net_device *dev = dst->dev;//取得出口网络设备指针
 	unsigned int hh_len = LL_RESERVED_SPACE(dev);//以太网头部长度
 
 	if (rt->rt_type == RTN_MULTICAST)//是否属组播类型
@@ -211,7 +211,7 @@ static inline int ip_finish_output2(struct sk_buff *skb)
 	if (dst->hh)//是否缓存了以太网头部，它由neighhhinit()函数初始化
 		return neigh_hh_output(dst->hh, skb);//调用缓冲头部结构的发送函数
 	else if (dst->neighbour)//是否指定了邻居结构
-		return dst->neighbour->output(skb);//调用邻居结构的发送函数。neigh_resolve_output()函数
+		return dst->neighbour->output(skb);//没有缓存L2头信息，需要调用邻居子系统来发送ARP。neigh_resolve_output()函数
 
 	if (net_ratelimit())//打印限速
 		printk(KERN_DEBUG "ip_finish_output2: No header cache and no neighbour!\n");
@@ -304,7 +304,7 @@ int ip_mc_output(struct sk_buff *skb)
 
 int ip_output(struct sk_buff *skb)
 {
-	struct net_device *dev = skb->dst->dev;//取得设备结构指针
+	struct net_device *dev = skb->dst->dev;//取得出口设备结构指针
 
 	IP_INC_STATS(IPSTATS_MIB_OUTREQUESTS);//递增输出请求计数器
 
@@ -790,7 +790,7 @@ int ip_append_data(struct sock *sk,
 			       int odd, struct sk_buff *skb), //将用户数据拷贝进skb中
 		   void *from, int length, int transhdrlen, //from: 用户的数据，length: 用户数据长度，transhdrlen: 传输层头部长度
 		   struct ipcm_cookie *ipc, struct rtable *rt, //ipc:临时存储 IP 层控制信息的数据结构，主要在发送数据包传递用户指定的 IP 层选项或参数。rt: 路由结构体指针
-		   unsigned int flags)
+		   unsigned int flags) // 用户指定的标志，例如 MSG_MORE
 {
 	struct inet_sock *inet = inet_sk(sk);
 	struct sk_buff *skb;
@@ -826,7 +826,7 @@ int ip_append_data(struct sock *sk,
 		}
 		dst_hold(&rt->u.dst);//路由引用计数+1
 		//得到用来分片的MTU
-		inet->cork.fragsize = mtu = inet->pmtudisc == IP_PMTUDISC_PROBE ? //支持PMTU探测模式，直接使用设备MTU，避免提前分片，确保探测包能触发ICMP反馈；否则保守使用路径MTU，避免分片被丢
+		inet->cork.fragsize = mtu = inet->pmtudisc == IP_PMTUDISC_PROBE ? //支持PMTU探测模式，直接使用设备MTU，避免提前分片，确保探测包能触发ICMP反馈；否则保守使用路由MTU，避免分片被丢
 					    rt->u.dst.dev->mtu : //网络设备的最大MTU
 					    dst_mtu(rt->u.dst.path); //路由表项的MTU
 		inet->cork.dst = &rt->u.dst;//保存路由项
